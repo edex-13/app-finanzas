@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Sistema de diseño: oscuro, minimalista, sin degradados.
+ * Tipografía redondeada protagonista (Nunito), números enormes,
+ * todo en píldoras/chips de bordes muy redondeados, acentos pastel
+ * apagados y un coral único para la acción principal.
+ */
+@layer base {
+  :root {
+    /* Negro casi puro como en la referencia */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 98%;
+
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 58%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 98%;
+
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+
+    /* Acción principal: coral (FAB de la referencia) */
+    --primary: 8 78% 66%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 96%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 8 78% 64%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 150 30% 62%;
+    --success-foreground: 150 40% 8%;
+
+    --warning: 40 55% 62%;
+    --warning-foreground: 40 60% 8%;
+
+    --ring: 8 78% 66%;
+
+    /* Bordes muy redondeados */
+    --radius: 1.25rem;
+
+    /*
+     * Paleta pastel apagada (mute). Base del ColorPicker propio y de las
+     * barras/categorías. Tono apagado para verse elegante sobre negro.
+     */
+    --pastel-lavender: 258 28% 74%;
+    --pastel-mint: 152 26% 70%;
+    --pastel-sand: 28 38% 76%;
+    --pastel-blue: 207 32% 73%;
+    --pastel-rose: 344 32% 76%;
+    --pastel-terracotta: 12 38% 70%;
+    --pastel-mustard: 42 38% 64%;
+    --pastel-olive: 78 18% 64%;
+
+    /* Sombra mínima (oscuro: casi imperceptible, profundidad por color plano) */
+    --shadow-soft: 0 1px 2px hsl(0 0% 0% / 0.4);
+  }
+
+  /*
+   * El rumbo es oscuro por defecto: la app monta <html class="dark"> pero
+   * mantenemos :root y .dark idénticos para que cualquier consumidor de los
+   * tokens funcione sin importar qué clase esté activa.
+   */
+  .dark {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 98%;
+
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 58%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 98%;
+
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+
+    --primary: 8 78% 66%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 96%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 8 78% 64%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 150 30% 62%;
+    --success-foreground: 150 40% 8%;
+
+    --warning: 40 55% 62%;
+    --warning-foreground: 40 60% 8%;
+
+    --ring: 8 78% 66%;
+
+    --pastel-lavender: 258 28% 74%;
+    --pastel-mint: 152 26% 70%;
+    --pastel-sand: 28 38% 76%;
+    --pastel-blue: 207 32% 73%;
+    --pastel-rose: 344 32% 76%;
+    --pastel-terracotta: 12 38% 70%;
+    --pastel-mustard: 42 38% 64%;
+    --pastel-olive: 78 18% 64%;
+
+    --shadow-soft: 0 1px 2px hsl(0 0% 0% / 0.4);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'tnum' 1;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .safe-pt {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-px {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* Permite que un contenedor scrollee con inercia y oculte la barra */
+  .scroll-touch {
+    -webkit-overflow-scrolling: touch;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Números financieros enormes y redondeados (estilo referencia) */
+  .text-hero {
+    @apply font-extrabold tracking-tight tnum;
+    letter-spacing: -0.03em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

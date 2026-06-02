@@ -1,0 +1,13 @@
+-- =============================================================
+-- 0004_seed_optional.sql
+-- OPCIONAL: ejemplos de datos para un usuario en desarrollo.
+-- Reemplaza '00000000-0000-0000-0000-000000000000' por tu user_id real.
+-- =============================================================
+
+-- DO NOT RUN EN PRODUCCIÓN.
+-- Ejemplo:
+-- insert into public.accounts (user_id, name, type, balance, color)
+--   values ('00000000-0000-0000-0000-000000000000','Efectivo','cash',150000,'#22c55e');
+--
+-- insert into public.credit_cards (user_id, name, bank, credit_limit, current_debt, statement_day, payment_due_day, color)
+--   values ('00000000-0000-0000-0000-000000000000','Visa Banco X','Banco X',5000000,1200000,15,5,'#3b82f6');
