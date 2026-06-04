@@ -1,11 +1,13 @@
 import * as React from 'react'
 import { Check, Plus } from 'lucide-react'
+import { HexColorPicker, HexColorInput } from 'react-colorful'
 import { cn } from '@/lib/utils'
 
 /**
- * Selector de color propio, minimalista.
+ * Selector de color propio, minimalista (estilo MonAi).
  * - Fila de swatches pastel apagados predefinidos (la paleta de marca).
- * - Botón "+" que abre el <input type="color"> nativo para un tono libre.
+ * - Botón "+" que abre un popover con un picker HSV (react-colorful) + campo
+ *   hex, en vez del feo <input type="color"> nativo del navegador.
  *
  * Controlado: recibe `value` (hex como "#aabbcc") y notifica con `onChange`.
  * RHF-friendly — basta con { value, onChange } de un Controller/register.
@@ -39,10 +41,27 @@ export const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
     const current = normalize(value)
     const isCustom =
       !!current && !PASTEL_SWATCHES.some((s) => s.hex.toLowerCase() === current)
-    const nativeRef = React.useRef<HTMLInputElement>(null)
+    const [open, setOpen] = React.useState(false)
+    const popRef = React.useRef<HTMLDivElement>(null)
+
+    // Cierra el popover al hacer click fuera.
+    React.useEffect(() => {
+      if (!open) return
+      function onDoc(e: MouseEvent) {
+        if (popRef.current && !popRef.current.contains(e.target as Node)) {
+          setOpen(false)
+        }
+      }
+      document.addEventListener('mousedown', onDoc)
+      return () => document.removeEventListener('mousedown', onDoc)
+    }, [open])
 
     return (
-      <div ref={ref} id={id} className={cn('flex flex-wrap items-center gap-2.5', className)}>
+      <div
+        ref={ref}
+        id={id}
+        className={cn('flex flex-wrap items-center gap-2.5', className)}
+      >
         {PASTEL_SWATCHES.map((s) => {
           const selected = current === s.hex.toLowerCase()
           return (
@@ -64,32 +83,47 @@ export const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
           )
         })}
 
-        {/* Color libre vía picker nativo */}
-        <button
-          type="button"
-          aria-label="Color personalizado"
-          title="Color personalizado"
-          onClick={() => nativeRef.current?.click()}
-          style={isCustom ? { backgroundColor: current } : undefined}
-          className={cn(
-            'relative grid h-9 w-9 place-items-center rounded-full ring-offset-2 ring-offset-background transition-transform active:scale-90',
-            isCustom ? 'ring-2 ring-foreground' : 'ring-1 ring-dashed ring-border bg-muted text-muted-foreground',
+        {/* Color libre vía popover con react-colorful */}
+        <div ref={popRef} className="relative">
+          <button
+            type="button"
+            aria-label="Color personalizado"
+            title="Color personalizado"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            style={isCustom ? { backgroundColor: current } : undefined}
+            className={cn(
+              'grid h-9 w-9 place-items-center rounded-full ring-offset-2 ring-offset-background transition-transform active:scale-90',
+              isCustom
+                ? 'ring-2 ring-foreground'
+                : 'bg-secondary text-muted-foreground ring-1 ring-dashed ring-border',
+            )}
+          >
+            {isCustom ? (
+              <Check className="h-4 w-4 text-black/70" strokeWidth={3} />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </button>
+
+          {open && (
+            <div className="custom-color-pop absolute left-0 top-11 z-50 w-[212px] space-y-3 rounded-2xl border border-border bg-popover p-3 shadow-soft">
+              <HexColorPicker
+                color={current || '#b7aed0'}
+                onChange={(hex) => onChange?.(hex)}
+              />
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-muted-foreground">#</span>
+                <HexColorInput
+                  color={current || '#b7aed0'}
+                  onChange={(hex) => onChange?.(hex)}
+                  prefixed={false}
+                  className="h-10 w-full rounded-xl border border-border bg-secondary px-3 text-sm font-bold uppercase tnum outline-none focus:ring-2 focus:ring-ring/40"
+                />
+              </div>
+            </div>
           )}
-        >
-          {isCustom ? (
-            <Check className="h-4 w-4 text-black/70" strokeWidth={3} />
-          ) : (
-            <Plus className="h-4 w-4" />
-          )}
-          <input
-            ref={nativeRef}
-            type="color"
-            value={current || '#b7aed0'}
-            onChange={(e) => onChange?.(e.target.value)}
-            className="absolute inset-0 h-px w-px opacity-0"
-            tabIndex={-1}
-          />
-        </button>
+        </div>
       </div>
     )
   },

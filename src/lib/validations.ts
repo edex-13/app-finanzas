@@ -118,25 +118,56 @@ export type IncomeSourceInput = z.infer<typeof incomeSourceSchema>
 // =============================================================
 // Transactions
 // =============================================================
-export const transactionSchema = z.object({
-  date: dateStr,
-  amount: z
-    .number({ message: 'Ingresa un monto' })
-    .positive('Debe ser > 0'),
-  kind: z.enum([
-    'income',
-    'expense',
-    'debt_payment',
-    'card_payment',
-    'transfer',
-  ]),
-  category_id: z.string().uuid().nullable().optional(),
-  account_id: z.string().uuid().nullable().optional(),
-  credit_card_id: z.string().uuid().nullable().optional(),
-  debt_id: z.string().uuid().nullable().optional(),
-  debt_installment_id: z.string().uuid().nullable().optional(),
-  note: z.string().max(500).optional().or(z.literal('').transform(() => undefined)),
-})
+export const transactionSchema = z
+  .object({
+    date: dateStr,
+    amount: z
+      .number({ message: 'Ingresa un monto' })
+      .positive('Debe ser > 0'),
+    kind: z.enum([
+      'income',
+      'expense',
+      'debt_payment',
+      'card_payment',
+      'transfer',
+      'adjustment',
+    ]),
+    category_id: z.string().uuid().nullable().optional(),
+    account_id: z.string().uuid().nullable().optional(),
+    counterparty_account_id: z.string().uuid().nullable().optional(),
+    credit_card_id: z.string().uuid().nullable().optional(),
+    debt_id: z.string().uuid().nullable().optional(),
+    debt_installment_id: z.string().uuid().nullable().optional(),
+    note: z.string().max(500).optional().or(z.literal('').transform(() => undefined)),
+    // Gasto con tarjeta a cuotas (opcional; activa la generación de cuotas)
+    installments_count: z.number().int().positive().nullable().optional(),
+    installment_has_interest: z.boolean().optional(),
+    installment_interest_rate: z.number().min(0).max(100).nullable().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.kind === 'adjustment' && (!v.note || v.note.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['note'],
+        message: 'El ajuste requiere una descripción',
+      })
+    }
+    if (v.kind === 'transfer') {
+      if (!v.account_id || !v.counterparty_account_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['counterparty_account_id'],
+          message: 'Selecciona cuenta origen y destino',
+        })
+      } else if (v.account_id === v.counterparty_account_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['counterparty_account_id'],
+          message: 'La cuenta destino debe ser distinta',
+        })
+      }
+    }
+  })
 export type TransactionInput = z.infer<typeof transactionSchema>
 
 export const recurringTransactionSchema = z.object({
@@ -174,6 +205,7 @@ export const categorySchema = z.object({
     'debt_payment',
     'card_payment',
     'transfer',
+    'adjustment',
   ]),
   color: hex,
   icon: z.string().max(40).optional().or(z.literal('').transform(() => undefined)),
@@ -189,6 +221,10 @@ export const simulationSchema = z.object({
   payment_option: z.enum(['cash', 'account', 'card']),
   selected_account_id: z.string().uuid().nullable().optional(),
   selected_card_id: z.string().uuid().nullable().optional(),
+  /** ¿Es una compra necesaria? Afecta la recomendación comprar/esperar. */
+  necessary: z.boolean().optional(),
+  /** Número de cuotas si se paga con tarjeta diferida (1 = sin diferir). */
+  installments_count: z.number().int().positive().nullable().optional(),
   note: z.string().max(200).optional().or(z.literal('').transform(() => undefined)),
 })
 export type SimulationInput = z.infer<typeof simulationSchema>

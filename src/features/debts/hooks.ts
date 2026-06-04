@@ -40,6 +40,77 @@ export function useDebtInstallments() {
   })
 }
 
+/** Cuotas de una deuda concreta (para la vista de detalle). */
+export function useInstallmentsByDebt(debtId: string | null) {
+  const { user } = useAuth()
+  return useQuery({
+    queryKey:
+      user && debtId
+        ? qk.installmentsByDebt(user.id, debtId)
+        : ['debt_installments', 'anon'],
+    enabled: !!user && !!debtId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('debt_installments')
+        .select('*')
+        .eq('user_id', user!.id)
+        .eq('debt_id', debtId!)
+        .order('sequence', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as DebtInstallmentRow[]
+    },
+  })
+}
+
+function invalidateAfterInstallment(
+  qc: ReturnType<typeof useQueryClient>,
+  userId: string,
+) {
+  qc.invalidateQueries({ queryKey: ['debt_installments', userId] })
+  qc.invalidateQueries({ queryKey: qk.debts(userId) })
+  qc.invalidateQueries({ queryKey: qk.accounts(userId) })
+  qc.invalidateQueries({ queryKey: qk.cards(userId) })
+  qc.invalidateQueries({ queryKey: ['transactions', userId] })
+}
+
+/** Paga una cuota atómicamente vía RPC pay_installment. */
+export function usePayInstallment() {
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      installmentId,
+      accountId,
+      date,
+    }: {
+      installmentId: string
+      accountId?: string | null
+      date?: string
+    }) => {
+      const { error } = await supabase.rpc('pay_installment', {
+        p_installment_id: installmentId,
+        p_account_id: accountId ?? null,
+        p_date: date ?? null,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => invalidateAfterInstallment(qc, user!.id),
+  })
+}
+
+/** Marca como vencidas las cuotas pendientes con fecha pasada. */
+export function useMarkOverdueInstallments() {
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc('mark_overdue_installments', {})
+      if (error) throw error
+    },
+    onSuccess: () => invalidateAfterInstallment(qc, user!.id),
+  })
+}
+
 export function useCreateDebt() {
   const { user } = useAuth()
   const qc = useQueryClient()

@@ -65,58 +65,61 @@ Los 10 prompts describen, en orden, la construcción incremental de la app. Hay 
 ---
 
 ## promt/4.md == promt/5.md — Transacciones reales
-**Estado global: 🟡 a medias** (núcleo funciona; faltan tipos/atomicidad/funciones nombradas)
+**Estado global: ✅ completo** (cerrado el 2026-06-03 — enfoque vertical lógica + rediseño MonAi)
 
 | Punto | Estado | Evidencia |
 |---|---|---|
 | Pantalla con listado | ✅ | `TransactionsPage.tsx` |
 | Filtros por fecha / tipo / categoría | ✅ | TransactionsPage |
-| Filtros por cuenta / tarjeta | ❌ | `TransactionFilters` solo tiene from/to/kind/categoryId |
-| Buscador por descripción | ❌ | no implementado |
+| Filtros por cuenta / tarjeta | ✅ | `TransactionFilters` ampliado (accountId/cardId); `useTransactions` aplica `.or()` cuenta origen/destino |
+| Buscador por descripción | ✅ | filtro `search` → `.ilike('note', …)` |
 | Tipos: ingreso, gasto, pago deuda, pago tarjeta, transferencia | ✅ | `TransactionForm.tsx` |
-| Tipo **ajuste** | ❌ | no existe en el enum `transaction_kind` |
-| Reglas ingreso/gasto/pago deuda | ✅ | `applyBalanceEffect()` |
-| Regla pago tarjeta sin sobrepago | 🟡 | descuenta pero usa `Math.max(0,…)`; sin validación dura de sobrepago |
-| Regla transferencia (mover entre cuentas, validar saldo) | ❌ | el form acepta el tipo pero `applyBalanceEffect` no maneja `transfer` |
-| Gasto con tarjeta a cuotas (pide #cuotas/interés/tasa/fecha y crea cuotas) | ❌ | el form no pide datos de cuotas |
-| Funciones puras EXACTAS: `applyIncomeTransaction`, `applyExpenseTransaction`, `applyDebtPaymentTransaction`, `applyCreditCardPaymentTransaction`, `applyTransferTransaction`, `applyAdjustmentTransaction`, `validateSufficientBalance`, `calculateTransactionImpact` | ❌ | toda la lógica está en un único `applyBalanceEffect()`; no existen con esos nombres |
+| Tipo **ajuste** | ✅ | enum ampliado (`20260603000001_add_adjustment_kind.sql`); fija el saldo de la cuenta |
+| Reglas ingreso/gasto/pago deuda | ✅ | RPC `create_financial_transaction` + funciones puras |
+| Regla pago tarjeta sin sobrepago | ✅ | validación dura en RPC y en `applyCreditCardPaymentTransaction` (lanza error) |
+| Regla transferencia (mover entre cuentas, validar saldo) | ✅ | `counterparty_account_id` + RPC valida saldo origen y patrimonio intacto |
+| Gasto con tarjeta a cuotas (pide #cuotas/interés/tasa/fecha y crea cuotas) | ✅ | form pide datos; `useCreateTransaction` genera cuotas vía `generateCardInstallments` |
+| Funciones puras EXACTAS: `applyIncomeTransaction`, `applyExpenseTransaction`, `applyDebtPaymentTransaction`, `applyCreditCardPaymentTransaction`, `applyTransferTransaction`, `applyAdjustmentTransaction`, `validateSufficientBalance`, `calculateTransactionImpact` | ✅ | las 8 con nombre exacto + tests en `financial-calculations.test.ts` |
 | Hooks: `useTransactions`, `useCreateTransaction`, `useDeleteTransaction` | ✅ | `transactions/hooks.ts` |
-| Hooks: `useUpdateTransaction`, `useTransactionFilters` | ❌ | no existen (no se pueden editar transacciones, solo borrar/recrear) |
-| RPC `create_financial_transaction` (atómica) | ❌ | no hay RPC; las mutaciones multi-tabla son **best-effort** en cliente (comentado "sin RPC") |
-| UI: badges por tipo, verde/rojo, confirmación de borrado | ✅ | TransactionsPage |
+| Hooks: `useUpdateTransaction`, `useTransactionFilters` | ✅ | edición de campos descriptivos (fecha/categoría/nota) + estado de filtros |
+| RPC `create_financial_transaction` (atómica) | ✅ | `20260603000003_*.sql` (SECURITY DEFINER, valida auth.uid() y pertenencia) |
+| UI: badges por tipo, verde/rojo, confirmación de borrado, **rediseño MonAi** | ✅ | filas-píldora, filtros-chip, detalle de impacto |
+
+⚠️ La **edición** solo cambia campos descriptivos; para cambiar monto/cuentas el flujo es borrar y recrear (revertir el efecto de saldo con exactitud no es trivial).
 
 ---
 
 ## promt/6.md — Automatización de cuotas / deudas / pagos futuros
-**Estado global: 🟡 a medias**
+**Estado global: ✅ completo** (cerrado el 2026-06-03)
 
 | Punto | Estado | Evidencia |
 |---|---|---|
-| Tabla `debt_installments` | ✅ | `0001_initial_schema.sql` |
-| Generar cuotas futuras de una deuda | ✅ | `generateDebtInstallments()` (se llama al crear deuda) |
-| Frecuencias: semanal/quincenal/mensual/cada X/personalizada | 🟡 | `advanceByFrequency` soporta varias; "cada X días"/personalizada parcial |
+| Tabla `debt_installments` | ✅ | `0001` + `20260603000002` añade `paid_at`/`credit_card_id`, `debt_id` nullable (XOR deuda/tarjeta) |
+| Generar cuotas futuras de una deuda | ✅ | `generateDebtInstallments()` / `generateInstallmentSchedule()` |
+| Frecuencias: semanal/quincenal/mensual/cada X/personalizada | ✅ | `generateInstallmentSchedule` con `custom_days` |
 | Al crear deuda: fechas, valor, registros, estado `pending` | ✅ | `useCreateDebt` |
-| Al pagar cuota: marcar paid, paid_at, bajar saldo/cuotas, crear transacción, actualizar proyección | 🟡 | se marca `paid` y baja saldo dentro de `applyBalanceEffect`; **no** hay `paid_at` ni flujo dedicado |
-| Estado `late`/vencida + alerta en dashboard/proyección | 🟡 | el dashboard marca "Vencido" por fecha; no se persiste estado `overdue` en BD |
-| Compras con tarjeta a cuotas | ❌ | no implementado |
-| Funciones: `generateInstallmentSchedule`, `calculateInstallmentAmount`, `markInstallmentAsPaid`, `detectLateInstallments`, `recalculateDebtProgress`, `generateCardInstallments` | ❌/🟡 | solo existe `generateDebtInstallments` (nombre distinto); el resto falta |
-| RPC para pagar cuota atómica | ❌ | no hay |
-| UI detalle de deuda: lista de cuotas, botón "marcar pagada", progreso, próxima/vencidas | 🟡 | hay progreso y resumen; **falta** lista de cuotas individuales y botón por cuota |
+| Al pagar cuota: marcar paid, paid_at, bajar saldo/cuotas, crear transacción | ✅ | RPC `pay_installment` (atómica) |
+| Estado `late`/vencida + alerta | ✅ | RPC `mark_overdue_installments` persiste `overdue`; alerta coral en detalle de deuda |
+| Compras con tarjeta a cuotas | ✅ | `generateCardInstallments` ligado al gasto-a-cuotas |
+| Funciones: `generateInstallmentSchedule`, `calculateInstallmentAmount`, `markInstallmentAsPaid`, `detectLateInstallments`, `recalculateDebtProgress`, `generateCardInstallments` | ✅ | las 6 con nombre exacto + tests |
+| RPC para pagar cuota atómica | ✅ | `20260603000004_rpc_pay_installment.sql` |
+| UI detalle de deuda: lista de cuotas, botón "marcar pagada", progreso, próxima/vencidas, **rediseño MonAi** | ✅ | `DebtDetail.tsx` (filas-píldora, chips de estado pastel/coral, progreso) |
 
 ---
 
 ## promt/7.md — Simulador de compra
-**Estado global: 🟡 a medias** (form + recomendación de tarjeta OK; faltan funciones nombradas, riesgo y convertir a transacción)
+**Estado global: ✅ completo** (cerrado el 2026-06-03)
 
 | Punto | Estado | Evidencia |
 |---|---|---|
-| Pantalla simulador + formulario (valor, fecha, categoría, necesaria, medio de pago) | 🟡 | `SimulatorPage.tsx` (valor/fecha/medio/cuenta; falta "necesaria" y "todas las tarjetas"/"cuotas") |
-| Pago con cuenta: validar saldo, saldo después, afecta pagos, mínimo de emergencia | 🟡 | valida saldo y saldo después; falta mínimo de emergencia y choque con pagos |
-| Pago con tarjeta: cupo, corte, fecha real de pago, días sin interés, cuotas, impacto deuda, utilización | 🟡 | `recommendCardForPurchase` cubre float/cupo/utilización; falta días sin interés explícito y cuotas |
-| Recomendación: mejor medio, comprar/esperar, riesgo bajo/medio/alto, razón | 🟡 | recomienda tarjeta + razón; **falta** nivel de riesgo y "comprar/esperar" |
-| Funciones EXACTAS: `simulateCashPurchase`, `simulateCreditCardPurchase`, `calculateDaysUntilPayment`, `calculateCardCutoffImpact`, `rankPaymentOptions`, `calculatePurchaseRisk`, `recommendBestPaymentMethod` | ❌ | solo `recommendCardForPurchase` (lógica inline en la página) |
+| Pantalla simulador + formulario (valor, fecha, necesaria, medio de pago, cuotas) | ✅ | `SimulatorPage.tsx` (switch necesaria, cuotas, tarjeta sugerida) |
+| Pago con cuenta: validar saldo, saldo después, mínimo de emergencia, choque con pagos | ✅ | `simulateCashPurchase` (emergencyMinimum 10% heurística + upcomingCommitted) |
+| Pago con tarjeta: cupo, corte, fecha real de pago, días sin interés, cuotas, impacto deuda, utilización | ✅ | `simulateCreditCardPurchase` + `calculateCardCutoffImpact` |
+| Recomendación: mejor medio, comprar/esperar, riesgo bajo/medio/alto, razón | ✅ | `recommendBestPaymentMethod` (verdict buy/wait/cannot + risk) |
+| Funciones EXACTAS: `simulateCashPurchase`, `simulateCreditCardPurchase`, `calculateDaysUntilPayment`, `calculateCardCutoffImpact`, `rankPaymentOptions`, `calculatePurchaseRisk`, `recommendBestPaymentMethod` | ✅ | las 7 con nombre exacto + tests |
 | Guardar en `purchase_simulations` | ✅ | tabla + `useSaveSimulation()` |
-| Botón convertir simulación → transacción real | ❌ | no existe |
+| Botón convertir simulación → transacción real | ✅ | `convertToTransaction` vía RPC `create_financial_transaction` |
+| **Rediseño MonAi** | ✅ | valor héroe, forma de pago en chips, veredicto semáforo, comparación en píldoras |
 
 ---
 
@@ -160,7 +163,18 @@ Pide: fondo claro, tipografía grande y redondeada, números enormes, pocas grá
 
 ## Conclusión rápida
 
-- **Sólido y funcional:** Supabase/Auth/Onboarding (1), Dashboard (2), CRUD cuentas/tarjetas/deudas (3), PWA base (9), estilo base (10).
-- **Funciona pero incompleto:** Transacciones (4/5) — faltan ajuste, transferencia real, edición, filtros cuenta/tarjeta/búsqueda y **atomicidad por RPC**. Cuotas (6). Simulador (7).
+- **Sólido y funcional:** Supabase/Auth/Onboarding (1), Dashboard (2), CRUD cuentas/tarjetas/deudas (3), **Transacciones (4/5) ✅**, **Cuotas (6) ✅**, **Simulador (7) ✅**, PWA base (9), estilo base (10).
 - **Sin empezar:** Importación CSV (8) — declarado fuera de alcance de v1.
-- **Brechas transversales más importantes:** (a) sin RPC atómica para movimientos que tocan varias tablas; (b) varias **funciones puras con los nombres exactos** que piden los prompts no existen (la lógica está agrupada en helpers); (c) sin edición de transacciones; (d) sin offline/InstallPrompt en PWA.
+- **Cerrado el 2026-06-03 (Fases 0-3 del plan vertical):** se añadieron 3 RPC atómicas
+  (`create_financial_transaction`, `pay_installment`, `mark_overdue_installments`), las
+  funciones puras con nombre exacto de los prompts 4/5/6/7 (+ tests), edición de
+  transacciones (campos descriptivos), transferencia/ajuste reales, cuotas de deuda y de
+  tarjeta con UI de pago por cuota, y simulador con riesgo/comprar-esperar/convertir a
+  transacción. Cada feature rediseñada al lenguaje MonAi vía el subagente `front-monai`.
+- **Pendiente operativo:** las 5 migraciones de Supabase (`supabase/migrations/2026060300000*.sql`)
+  **no se han pusheado** a la nube (`npm run sb:push`); hasta entonces las RPC no existen en
+  el backend y los flujos fallan en runtime.
+- **Brechas transversales restantes:** (a) PWA sin offline/InstallPrompt; (b) **deuda UI/UX**:
+  ~40% de la app aún no es MonAi (forms genéricos con Input/Select caja dura, gráficas
+  Recharts crudas, Settings/Login/Register sin rediseñar, diálogos no bottom-sheet en móvil,
+  grids sin animación) — ver plan de pulido UI/UX.

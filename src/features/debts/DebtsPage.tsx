@@ -1,21 +1,17 @@
 import { useState } from 'react'
-import { ListChecks, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ListChecks, Pencil, Plus, Receipt, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
+import { ResponsiveModal } from '@/components/ui/responsive-modal'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/common/EmptyState'
 import { MoneyDisplay } from '@/components/common/MoneyDisplay'
+import { MotionList, MotionItem } from '@/components/common/Motion'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DebtForm } from './DebtForm'
+import { DebtDetail } from './DebtDetail'
 import {
   useCreateDebt,
   useDebts,
@@ -47,6 +43,7 @@ export function DebtsPage() {
   const del = useDeleteDebt()
   const [openNew, setOpenNew] = useState(false)
   const [editing, setEditing] = useState<DebtRow | null>(null)
+  const [detail, setDetail] = useState<DebtRow | null>(null)
 
   return (
     <div>
@@ -54,29 +51,28 @@ export function DebtsPage() {
         title="Deudas"
         description="Lleva el control de tus préstamos, cuotas e intereses."
         action={
-          <Dialog open={openNew} onOpenChange={setOpenNew}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Nueva deuda
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Nueva deuda</DialogTitle>
-              </DialogHeader>
-              <DebtForm
-                onCancel={() => setOpenNew(false)}
-                onSubmit={async (values) => {
-                  await create.mutateAsync(values)
-                  toast.success('Deuda creada')
-                  setOpenNew(false)
-                }}
-              />
-            </DialogContent>
-          </Dialog>
+          <Button onClick={() => setOpenNew(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva deuda
+          </Button>
         }
       />
+
+      <ResponsiveModal
+        open={openNew}
+        onOpenChange={setOpenNew}
+        title="Nueva deuda"
+        className="sm:max-w-2xl"
+      >
+        <DebtForm
+          onCancel={() => setOpenNew(false)}
+          onSubmit={async (values) => {
+            await create.mutateAsync(values)
+            toast.success('Deuda creada')
+            setOpenNew(false)
+          }}
+        />
+      </ResponsiveModal>
 
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -97,7 +93,7 @@ export function DebtsPage() {
           }
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <MotionList className="grid gap-3 sm:grid-cols-2">
           {data.map((d) => {
             const progress =
               d.total_amount > 0
@@ -107,7 +103,8 @@ export function DebtsPage() {
                   )
                 : 0
             return (
-              <Card key={d.id}>
+              <MotionItem key={d.id}>
+              <Card>
                 <CardContent className="space-y-3 p-5">
                   <div className="flex items-start justify-between">
                     <div>
@@ -167,6 +164,15 @@ export function DebtsPage() {
 
                   <div className="flex justify-end gap-1">
                     <Button
+                      size="sm"
+                      variant="pill"
+                      className="mr-auto font-bold"
+                      onClick={() => setDetail(d)}
+                    >
+                      <Receipt className="mr-1 h-4 w-4" />
+                      Ver cuotas
+                    </Button>
+                    <Button
                       size="icon"
                       variant="ghost"
                       onClick={() => setEditing(d)}
@@ -187,29 +193,38 @@ export function DebtsPage() {
                   </div>
                 </CardContent>
               </Card>
+              </MotionItem>
             )
           })}
-        </div>
+        </MotionList>
       )}
 
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Editar deuda</DialogTitle>
-          </DialogHeader>
-          {editing && (
-            <DebtForm
-              initial={editing}
-              onCancel={() => setEditing(null)}
-              onSubmit={async (values) => {
-                await update.mutateAsync({ id: editing.id, input: values })
-                toast.success('Deuda actualizada')
-                setEditing(null)
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <ResponsiveModal
+        open={!!editing}
+        onOpenChange={(o) => !o && setEditing(null)}
+        title="Editar deuda"
+        className="sm:max-w-2xl"
+      >
+        {editing && (
+          <DebtForm
+            initial={editing}
+            onCancel={() => setEditing(null)}
+            onSubmit={async (values) => {
+              await update.mutateAsync({ id: editing.id, input: values })
+              toast.success('Deuda actualizada')
+              setEditing(null)
+            }}
+          />
+        )}
+      </ResponsiveModal>
+
+      <ResponsiveModal
+        open={!!detail}
+        onOpenChange={(o) => !o && setDetail(null)}
+        title={detail ? `${detail.name} · Cuotas` : 'Cuotas'}
+      >
+        {detail && <DebtDetail debt={detail} />}
+      </ResponsiveModal>
     </div>
   )
 }

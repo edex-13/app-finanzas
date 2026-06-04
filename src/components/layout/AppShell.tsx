@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  CreditCard,
   LayoutDashboard,
   LineChart,
   ListChecks,
@@ -30,8 +29,7 @@ import { cn } from '@/lib/utils'
 const links = [
   { to: paths.dashboard, label: 'Inicio', icon: LayoutDashboard },
   { to: paths.transactions, label: 'Movimientos', icon: Receipt },
-  { to: paths.accounts, label: 'Cuentas', icon: Wallet },
-  { to: paths.cards, label: 'Tarjetas', icon: CreditCard },
+  { to: paths.wallet, label: 'Cuentas y tarjetas', icon: Wallet },
   { to: paths.debts, label: 'Deudas', icon: ListChecks },
   { to: paths.income, label: 'Ingresos', icon: Briefcase },
   { to: paths.projections, label: 'Proyección', icon: LineChart },
@@ -40,8 +38,10 @@ const links = [
 ] as const
 
 // Items principales del bottom-nav móvil (4 + botón central + "más")
-const mobilePrimary = [links[0], links[1], links[6], links[8]] as const
-const mobileSecondary = [links[2], links[3], links[4], links[5], links[7]] as const
+// Inicio · Movimientos · (FAB) · Deudas · Proyección
+const mobilePrimary = [links[0], links[1], links[3], links[5]] as const
+// El resto (Cuentas y tarjetas, Ingresos, Simulador, Ajustes) van en la hoja "más".
+const mobileSecondary = [links[2], links[4], links[6], links[7]] as const
 
 function BrandMark() {
   return (
@@ -65,13 +65,13 @@ export function AppShell() {
   }
 
   return (
-    <div className="grid h-full w-full grid-cols-1 md:grid-cols-[260px_1fr]">
-      {/* Sidebar (desktop) */}
-      <aside className="hidden flex-col border-r border-border bg-card/60 backdrop-blur md:flex">
+    <div className="grid h-screen w-full grid-cols-1 overflow-hidden md:grid-cols-[260px_1fr]">
+      {/* Sidebar (desktop) — fijo: el contenedor raíz no scrollea, solo el main */}
+      <aside className="hidden h-screen flex-col overflow-hidden border-r border-border bg-card/60 backdrop-blur md:flex">
         <div className="flex h-16 items-center px-5">
           <BrandMark />
         </div>
-        <nav className="flex-1 space-y-1 overflow-auto p-3">
+        <nav className="nice-scroll flex-1 space-y-1 overflow-auto p-3">
           {links.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -117,7 +117,7 @@ export function AppShell() {
       </aside>
 
       {/* Main */}
-      <div className="flex h-full min-w-0 flex-col">
+      <div className="flex h-screen min-w-0 flex-col overflow-hidden">
         <header className="safe-pt sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur md:hidden">
           <BrandMark />
           <Button size="icon" variant="ghost" onClick={handleLogout}>
@@ -125,7 +125,7 @@ export function AppShell() {
           </Button>
         </header>
 
-        <main className="no-scrollbar min-w-0 flex-1 overflow-auto scroll-touch px-4 pb-28 pt-4 md:px-8 md:pb-10 md:pt-8">
+        <main className="no-scrollbar md:nice-scroll min-w-0 flex-1 overflow-auto scroll-touch px-4 pb-28 pt-4 md:px-8 md:pb-10 md:pt-8">
           <div className="mx-auto w-full max-w-5xl">
             <PageTransition>
               <Outlet />

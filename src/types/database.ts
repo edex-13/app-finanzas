@@ -14,6 +14,7 @@ export type IncomePaymentType = 'monthly' | 'biweekly'
 export type SalaryPeriodType =
   | 'regular'
   | 'prima'
+  | 'cesantias'
   | 'cesantias_interest'
   | 'bonus'
 export type CategoryKind =
@@ -22,6 +23,7 @@ export type CategoryKind =
   | 'debt_payment'
   | 'card_payment'
   | 'transfer'
+  | 'adjustment'
 export type TransactionKind = CategoryKind
 export type RecurrenceFrequency =
   | 'daily'
@@ -108,12 +110,14 @@ export interface DebtRow {
 export interface DebtInstallmentRow {
   id: string
   user_id: string
-  debt_id: string
+  debt_id: string | null
+  credit_card_id: string | null
   sequence: number
   due_date: string
   amount: number
   status: InstallmentStatus
   paid_transaction_id: string | null
+  paid_at: string | null
   created_at: string
   updated_at: string
 }
@@ -189,6 +193,7 @@ export interface TransactionRow {
   kind: TransactionKind
   category_id: string | null
   account_id: string | null
+  counterparty_account_id: string | null
   credit_card_id: string | null
   debt_id: string | null
   debt_installment_id: string | null

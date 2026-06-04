@@ -6,6 +6,8 @@ export const paths = {
   // protected
   dashboard: '/',
   onboarding: '/onboarding',
+  /** Página unificada de cuentas + tarjetas (con switch). */
+  wallet: '/wallet',
   accounts: '/accounts',
   cards: '/credit-cards',
   debts: '/debts',

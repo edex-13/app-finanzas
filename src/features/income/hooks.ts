@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addMonths, endOfMonth, getDaysInYear, startOfMonth } from 'date-fns'
+import { addMonths, endOfMonth, startOfMonth } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { qk } from '@/lib/query-keys'
 import { useAuth } from '@/features/auth/AuthProvider'
 import type { IncomeSourceRow, SalaryPeriodRow } from '@/types/database'
 import type { IncomeSourceInput } from '@/lib/validations'
+import { calculateBiweeklySalary } from '@/lib/financial-calculations'
 import {
-  calculateBiweeklySalary,
-  calculateCesantiasInterest,
-  calculateEstimatedPrima,
-} from '@/lib/financial-calculations'
+  calculateNetSalary,
+  calculatePrimaCO,
+  calculateCesantias,
+  calculateCesantiasInterestCO,
+} from '@/lib/labor-co'
 import { fromISODate, today, toISODate } from '@/lib/date-utils'
 
 export function useIncomeSources() {
@@ -46,11 +48,18 @@ export function useSalaryPeriods() {
   })
 }
 
-function generateSalaryPeriods(
-  income: IncomeSourceRow,
-): Omit<SalaryPeriodRow, 'id' | 'created_at' | 'updated_at'>[] {
-  const out: Omit<SalaryPeriodRow, 'id' | 'created_at' | 'updated_at'>[] = []
+type NewPeriod = Omit<SalaryPeriodRow, 'id' | 'created_at' | 'updated_at'>
+
+function generateSalaryPeriods(income: IncomeSourceRow): NewPeriod[] {
+  const out: NewPeriod[] = []
   const start = today()
+
+  // Salario que llega a la cuenta = NETO (tras salud + pensión + FSP).
+  // Si la fuente NO es salario con prestaciones de ley, se asume monto tal cual.
+  const monthlyNet = income.includes_legal_benefits
+    ? calculateNetSalary(income.monthly_amount).net
+    : income.monthly_amount
+
   for (let i = 0; i < 6; i += 1) {
     const monthStart = startOfMonth(addMonths(start, i))
     const monthEnd = endOfMonth(monthStart)
@@ -61,7 +70,7 @@ function generateSalaryPeriods(
         income_source_id: income.id,
         period_start: toISODate(monthStart),
         period_end: toISODate(mid),
-        expected_amount: calculateBiweeklySalary(income.monthly_amount),
+        expected_amount: calculateBiweeklySalary(monthlyNet),
         actual_amount: null,
         type: 'regular',
       })
@@ -72,7 +81,7 @@ function generateSalaryPeriods(
           new Date(monthStart.getFullYear(), monthStart.getMonth(), 16),
         ),
         period_end: toISODate(monthEnd),
-        expected_amount: calculateBiweeklySalary(income.monthly_amount),
+        expected_amount: calculateBiweeklySalary(monthlyNet),
         actual_amount: null,
         type: 'regular',
       })
@@ -82,58 +91,73 @@ function generateSalaryPeriods(
         income_source_id: income.id,
         period_start: toISODate(monthStart),
         period_end: toISODate(monthEnd),
-        expected_amount: income.monthly_amount,
+        expected_amount: monthlyNet,
         actual_amount: null,
         type: 'regular',
       })
     }
   }
 
-  // Prima estimada (Colombia): mitad de salario en jun y dic
+  // Prestaciones de ley (Colombia). Las cantidades usan el salario BRUTO.
   if (income.includes_legal_benefits) {
     const year = start.getFullYear()
-    const jun15 = new Date(year, 5, 15)
-    const dec15 = new Date(year, 11, 15)
-    for (const primaDate of [jun15, dec15]) {
+    const startDate = fromISODate(income.start_date)
+
+    // Prima: junio (1er semestre) y diciembre (2º semestre), medio salario c/u.
+    const jun30 = new Date(year, 5, 30)
+    const dec20 = new Date(year, 11, 20)
+    for (const primaDate of [jun30, dec20]) {
       if (primaDate < start) continue
       out.push({
         user_id: income.user_id,
         income_source_id: income.id,
         period_start: toISODate(primaDate),
         period_end: toISODate(primaDate),
-        expected_amount: calculateEstimatedPrima(income.monthly_amount, 180),
+        expected_amount: calculatePrimaCO(income.monthly_amount, 180),
         actual_amount: null,
         type: 'prima',
       })
     }
 
-    // Intereses cesantías: hasta el 31 de enero del año siguiente
+    // Días trabajados en el año hasta el cierre (31 dic), tope 360.
+    const yearEnd = new Date(year, 11, 31)
+    const daysWorked = Math.min(
+      360,
+      Math.max(
+        0,
+        Math.floor((yearEnd.getTime() - startDate.getTime()) / 86_400_000) + 1,
+      ),
+    )
+    const cesantias = calculateCesantias(income.monthly_amount, daysWorked)
+
+    // Cesantías (capital): se consignan al fondo a mediados de febrero del año
+    // siguiente. INFORMATIVAS — la proyección NO las suma al saldo de la cuenta.
+    const feb14 = new Date(year + 1, 1, 14)
+    if (feb14 > start && cesantias > 0) {
+      out.push({
+        user_id: income.user_id,
+        income_source_id: income.id,
+        period_start: toISODate(feb14),
+        period_end: toISODate(feb14),
+        expected_amount: cesantias,
+        actual_amount: null,
+        type: 'cesantias',
+      })
+    }
+
+    // Intereses sobre cesantías: SÍ van a la cuenta, máximo 31 de enero.
     const nextJan = new Date(year + 1, 0, 31)
-    if (nextJan > start) {
-      const startDate = fromISODate(income.start_date)
-      const daysWorked = Math.min(
-        365,
-        Math.max(
-          0,
-          Math.floor((nextJan.getTime() - startDate.getTime()) / 86_400_000),
-        ),
-      )
-      const cesantiasAcumuladas = (income.monthly_amount * daysWorked) / 360
+    if (nextJan > start && cesantias > 0) {
       out.push({
         user_id: income.user_id,
         income_source_id: income.id,
         period_start: toISODate(nextJan),
         period_end: toISODate(nextJan),
-        expected_amount: calculateCesantiasInterest(
-          cesantiasAcumuladas,
-          daysWorked,
-        ),
+        expected_amount: calculateCesantiasInterestCO(cesantias, daysWorked),
         actual_amount: null,
         type: 'cesantias_interest',
       })
     }
-    // referencia silenciosa para evitar warning
-    void getDaysInYear
   }
   return out
 }

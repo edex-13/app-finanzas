@@ -21,7 +21,7 @@ import {
 import { useAccounts } from '@/features/accounts/hooks'
 import { useCreditCards } from '@/features/credit-cards/hooks'
 import { useCategories } from './hooks'
-import type { RecurrenceFrequency, TransactionKind } from '@/types/database'
+import type { RecurrenceFrequency } from '@/types/database'
 import { toISODate, today } from '@/lib/date-utils'
 
 interface Props {
@@ -36,6 +36,18 @@ const freqLabel: Record<RecurrenceFrequency, string> = {
   monthly: 'Mensual',
   yearly: 'Anual',
 }
+
+// Trigger de Select como píldora suave (sin caja con borde duro).
+const pillTrigger =
+  'h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus:ring-2 focus:ring-ring/40 focus:ring-offset-0'
+
+// Input/MoneyInput como píldora suave.
+const pillInput =
+  'h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus-visible:ring-2 focus-visible:ring-ring/40'
+
+// Textarea como píldora suave.
+const pillTextarea =
+  'rounded-2xl border-0 bg-secondary px-4 py-3 text-base focus-visible:ring-2 focus-visible:ring-ring/40'
 
 export function RecurringForm({ onSubmit, onCancel }: Props) {
   const { data: accounts = [] } = useAccounts()
@@ -78,7 +90,7 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
   })
 
   return (
-    <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
       <FormField
         label="Nombre"
         htmlFor="name"
@@ -88,18 +100,21 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
           id="name"
           {...form.register('name')}
           placeholder="Arriendo, Netflix, etc."
+          className={pillInput}
         />
       </FormField>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField label="Tipo">
           <Select
             value={kind}
             onValueChange={(v) =>
-              form.setValue('kind', v as TransactionKind, { shouldValidate: true })
+              form.setValue('kind', v as RecurringTransactionInput['kind'], {
+                shouldValidate: true,
+              })
             }
           >
-            <SelectTrigger>
+            <SelectTrigger className={pillTrigger}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -119,11 +134,12 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
             onChange={(v) =>
               form.setValue('amount', v, { shouldValidate: true })
             }
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField label="Frecuencia">
           <Select
             value={form.watch('frequency')}
@@ -131,7 +147,7 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
               form.setValue('frequency', v as RecurrenceFrequency)
             }
           >
-            <SelectTrigger>
+            <SelectTrigger className={pillTrigger}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -149,11 +165,12 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
             type="number"
             min={1}
             {...form.register('interval_count', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Próxima ocurrencia"
           htmlFor="next_occurrence_date"
@@ -163,10 +180,16 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
             id="next_occurrence_date"
             type="date"
             {...form.register('next_occurrence_date')}
+            className={pillInput}
           />
         </FormField>
         <FormField label="Fecha de fin (opcional)" htmlFor="end_date">
-          <Input id="end_date" type="date" {...form.register('end_date')} />
+          <Input
+            id="end_date"
+            type="date"
+            {...form.register('end_date')}
+            className={pillInput}
+          />
         </FormField>
       </div>
 
@@ -177,7 +200,7 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
             form.setValue('category_id', v === '__none' ? null : v)
           }
         >
-          <SelectTrigger>
+          <SelectTrigger className={pillTrigger}>
             <SelectValue placeholder="Sin categoría" />
           </SelectTrigger>
           <SelectContent>
@@ -200,7 +223,7 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
             form.setValue('account_id', v === '__none' ? null : v)
           }
         >
-          <SelectTrigger>
+          <SelectTrigger className={pillTrigger}>
             <SelectValue placeholder="Ninguna" />
           </SelectTrigger>
           <SelectContent>
@@ -222,7 +245,7 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
               form.setValue('credit_card_id', v === '__none' ? null : v)
             }
           >
-            <SelectTrigger>
+            <SelectTrigger className={pillTrigger}>
               <SelectValue placeholder="Sin tarjeta" />
             </SelectTrigger>
             <SelectContent>
@@ -237,8 +260,8 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
         </FormField>
       )}
 
-      <div className="flex items-center justify-between rounded-md border p-3">
-        <p className="text-sm font-medium">Activa</p>
+      <div className="flex items-center justify-between rounded-2xl bg-secondary p-4">
+        <p className="text-sm font-bold">Activa</p>
         <Switch
           checked={form.watch('active')}
           onCheckedChange={(v) => form.setValue('active', v)}
@@ -246,16 +269,25 @@ export function RecurringForm({ onSubmit, onCancel }: Props) {
       </div>
 
       <FormField label="Notas" htmlFor="notes">
-        <Textarea id="notes" rows={2} {...form.register('notes')} />
+        <Textarea
+          id="notes"
+          rows={2}
+          {...form.register('notes')}
+          className={pillTextarea}
+        />
       </FormField>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancelar
           </Button>
         )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
+        <Button
+          type="submit"
+          disabled={form.formState.isSubmitting}
+          className="w-full sm:w-auto"
+        >
           Guardar
         </Button>
       </div>

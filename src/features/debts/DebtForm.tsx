@@ -40,6 +40,18 @@ const freqOptions: { value: DebtInput['payment_frequency']; label: string }[] = 
   { value: 'custom', label: 'Otra' },
 ]
 
+// Trigger de Select como píldora suave (sin caja con borde duro).
+const pillTrigger =
+  'h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus:ring-2 focus:ring-ring/40 focus:ring-offset-0'
+
+// Input/MoneyInput como píldora suave.
+const pillInput =
+  'h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus-visible:ring-2 focus-visible:ring-ring/40'
+
+// Textarea como píldora suave.
+const pillTextarea =
+  'rounded-2xl border-0 bg-secondary px-4 py-3 text-base focus-visible:ring-2 focus-visible:ring-ring/40'
+
 export function DebtForm({
   initial,
   onSubmit,
@@ -75,14 +87,19 @@ export function DebtForm({
   })
 
   return (
-    <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-      <div className="grid gap-4 sm:grid-cols-2">
+    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Nombre"
           htmlFor="name"
           error={form.formState.errors.name?.message}
         >
-          <Input id="name" {...form.register('name')} placeholder="Crédito vehículo" />
+          <Input
+            id="name"
+            {...form.register('name')}
+            placeholder="Crédito vehículo"
+            className={pillInput}
+          />
         </FormField>
         <FormField label="Tipo de deuda">
           <Select
@@ -91,7 +108,7 @@ export function DebtForm({
               form.setValue('debt_type', v as DebtInput['debt_type'])
             }
           >
-            <SelectTrigger>
+            <SelectTrigger className={pillTrigger}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -105,7 +122,7 @@ export function DebtForm({
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Valor total"
           error={form.formState.errors.total_amount?.message}
@@ -115,6 +132,7 @@ export function DebtForm({
             onChange={(v) =>
               form.setValue('total_amount', v, { shouldValidate: true })
             }
+            className={pillInput}
           />
         </FormField>
         <FormField
@@ -126,13 +144,14 @@ export function DebtForm({
             onChange={(v) =>
               form.setValue('remaining_balance', v, { shouldValidate: true })
             }
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="flex items-center justify-between rounded-md border p-3">
+      <div className="flex items-center justify-between rounded-2xl bg-secondary p-4">
         <div>
-          <p className="text-sm font-medium">¿Tiene intereses?</p>
+          <p className="text-sm font-bold">¿Tiene intereses?</p>
           <p className="text-xs text-muted-foreground">
             Si es Sí, ingresa la tasa anual aproximada.
           </p>
@@ -154,11 +173,12 @@ export function DebtForm({
             type="number"
             step="0.01"
             {...form.register('interest_rate', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField label="Frecuencia de pago">
           <Select
             value={form.watch('payment_frequency')}
@@ -169,7 +189,7 @@ export function DebtForm({
               )
             }
           >
-            <SelectTrigger>
+            <SelectTrigger className={pillTrigger}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -190,17 +210,19 @@ export function DebtForm({
             id="next_payment_date"
             type="date"
             {...form.register('next_payment_date')}
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-3">
         <FormField label="Cuotas totales" htmlFor="total_installments">
           <Input
             id="total_installments"
             type="number"
             min={1}
             {...form.register('total_installments', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
         <FormField label="Cuotas restantes" htmlFor="remaining_installments">
@@ -209,6 +231,7 @@ export function DebtForm({
             type="number"
             min={0}
             {...form.register('remaining_installments', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
         <FormField
@@ -222,21 +245,31 @@ export function DebtForm({
                 shouldValidate: true,
               })
             }
+            className={pillInput}
           />
         </FormField>
       </div>
 
       <FormField label="Notas" htmlFor="notes">
-        <Textarea id="notes" rows={2} {...form.register('notes')} />
+        <Textarea
+          id="notes"
+          rows={2}
+          {...form.register('notes')}
+          className={pillTextarea}
+        />
       </FormField>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancelar
           </Button>
         )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
+        <Button
+          type="submit"
+          disabled={form.formState.isSubmitting}
+          className="w-full sm:w-auto"
+        >
           {submitLabel}
         </Button>
       </div>

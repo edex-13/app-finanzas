@@ -31,7 +31,7 @@ export function SheetContent({
         {showHandle && (
           <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-muted-foreground/30" />
         )}
-        <div className="safe-px flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="safe-px flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-4">
           {children}
         </div>
       </Drawer.Content>

@@ -2,16 +2,9 @@ import { useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { Sparkles, ShoppingCart } from 'lucide-react'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Sparkles, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -19,29 +12,59 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from '@/components/ui/radio-group'
-import { Label } from '@/components/ui/label'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { FormField } from '@/components/common/FormField'
 import { MoneyInput } from '@/components/common/MoneyInput'
 import { MoneyDisplay } from '@/components/common/MoneyDisplay'
+import { MotionList, MotionItem } from '@/components/common/Motion'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { cn } from '@/lib/utils'
 import { simulationSchema, type SimulationInput } from '@/lib/validations'
 import { useAccounts } from '@/features/accounts/hooks'
 import { useCreditCards } from '@/features/credit-cards/hooks'
 import { useFinancialSnapshot } from '@/hooks/useFinancialSnapshot'
+import { useCreateTransaction } from '@/features/transactions/hooks'
 import {
-  calculateAvailableCardLimit,
-  recommendCardForPurchase,
+  simulateCashPurchase,
+  simulateCreditCardPurchase,
+  recommendBestPaymentMethod,
+  calculateCardCutoffImpact,
+  type PurchaseRisk,
+  type PurchaseVerdict,
 } from '@/lib/financial-calculations'
 import { fromISODate, toISODate, today, formatDateShort } from '@/lib/date-utils'
 import { usePurchaseSimulations, useSaveSimulation } from './hooks'
 
 type PaymentOption = SimulationInput['payment_option']
+
+const riskLabel: Record<PurchaseRisk, string> = {
+  low: 'Riesgo bajo',
+  medium: 'Riesgo medio',
+  high: 'Riesgo alto',
+}
+const verdictLabel: Record<PurchaseVerdict, string> = {
+  buy: 'Puedes comprarlo',
+  wait: 'Mejor espera',
+  cannot: 'No deberías comprarlo ahora',
+}
+
+/** Chip pastel apagado para el nivel de riesgo (texto oscuro sobre pastel). */
+const riskChip: Record<PurchaseRisk, string> = {
+  low: 'bg-pastel-mint text-black/70',
+  medium: 'bg-pastel-sand text-black/70',
+  high: 'bg-destructive text-destructive-foreground',
+}
+
+/** Bloque-semáforo del veredicto: pastel/coral según resultado. */
+const verdictBlock: Record<PurchaseVerdict, string> = {
+  buy: 'bg-pastel-mint text-black/80',
+  wait: 'bg-pastel-sand text-black/80',
+  cannot: 'bg-destructive text-destructive-foreground',
+}
+
+const verdictEmoji: Record<PurchaseVerdict, string> = {
+  buy: '✅',
+  wait: '⏳',
+  cannot: '🚫',
+}
 
 export function SimulatorPage() {
   const accounts = useAccounts()
@@ -49,6 +72,7 @@ export function SimulatorPage() {
   const snap = useFinancialSnapshot()
   const sims = usePurchaseSimulations()
   const save = useSaveSimulation()
+  const createTx = useCreateTransaction()
   const [submitted, setSubmitted] = useState<SimulationInput | null>(null)
 
   const form = useForm<SimulationInput>({
@@ -59,66 +83,130 @@ export function SimulatorPage() {
       payment_option: 'cash',
       selected_account_id: null,
       selected_card_id: null,
+      necessary: true,
+      installments_count: 1,
     },
   })
+
+  // Colchón de emergencia simple: 10% del disponible (heurística v1).
+  const emergencyMinimum = useMemo(
+    () => Math.round(snap.data.totalAvailable * 0.1),
+    [snap.data.totalAvailable],
+  )
 
   const result = useMemo(() => {
     const values = submitted
     if (!values) return null
     const amount = values.input_amount
     const date = fromISODate(values.simulation_date)
+    const allCards = cards.data ?? []
+    const allAccounts = accounts.data ?? []
+
+    // Recomendación global (mejor medio + comprar/esperar + riesgo).
+    const recommendation = recommendBestPaymentMethod({
+      amount,
+      totalAvailable: snap.data.totalAvailable,
+      accounts: allAccounts,
+      cards: allCards,
+      necessary: values.necessary,
+      emergencyMinimum,
+      purchaseDate: date,
+    })
 
     if (values.payment_option === 'cash') {
-      const available = snap.data.totalAvailable
+      const sim = simulateCashPurchase({
+        amount,
+        availableBalance: snap.data.totalAvailable,
+        emergencyMinimum,
+      })
       return {
-        ok: available >= amount,
-        title:
-          available >= amount
-            ? `Sí puedes comprarlo en efectivo`
-            : `No alcanza tu efectivo`,
-        message: `Disponible en cuentas: $${available.toLocaleString('es-CO')}. Quedaría $${(available - amount).toLocaleString('es-CO')}.`,
+        kind: 'cash' as const,
+        ok: sim.canAfford,
+        risk: sim.risk,
+        verdict: recommendation.verdict,
+        title: sim.canAfford ? 'Sí puedes pagarlo en efectivo' : 'No alcanza tu efectivo',
+        message: `Disponible: ${fmt(snap.data.totalAvailable)}. Quedaría ${fmt(sim.balanceAfter)}.`,
+        balanceAfter: sim.balanceAfter,
+        recommendation,
         suggestedCardId: null as string | null,
       }
     }
+
     if (values.payment_option === 'account') {
-      const acc = accounts.data?.find((a) => a.id === values.selected_account_id)
-      if (!acc)
+      const acc = allAccounts.find((a) => a.id === values.selected_account_id)
+      if (!acc) {
         return {
+          kind: 'account' as const,
           ok: false,
+          risk: 'high' as PurchaseRisk,
+          verdict: 'cannot' as PurchaseVerdict,
           title: 'Elige una cuenta',
           message: 'Selecciona la cuenta con la que pagarías.',
+          recommendation,
           suggestedCardId: null,
         }
-      const remaining = Number(acc.balance) - amount
+      }
+      const sim = simulateCashPurchase({
+        amount,
+        availableBalance: Number(acc.balance),
+        emergencyMinimum,
+      })
       return {
-        ok: remaining >= 0,
-        title:
-          remaining >= 0
-            ? `Sí puedes pagarlo desde ${acc.name}`
-            : `No alcanza el saldo en ${acc.name}`,
-        message: `Saldo de la cuenta: $${Number(acc.balance).toLocaleString('es-CO')}. Quedaría $${remaining.toLocaleString('es-CO')}.`,
+        kind: 'account' as const,
+        ok: sim.canAfford,
+        risk: sim.risk,
+        verdict: recommendation.verdict,
+        title: sim.canAfford
+          ? `Sí puedes pagarlo desde ${acc.name}`
+          : `No alcanza el saldo en ${acc.name}`,
+        message: `Saldo: ${fmt(Number(acc.balance))}. Quedaría ${fmt(sim.balanceAfter)}.`,
+        balanceAfter: sim.balanceAfter,
+        recommendation,
         suggestedCardId: null,
       }
     }
-    // card
-    const rec = recommendCardForPurchase(amount, date, cards.data ?? [])
-    return {
-      ok: !!rec.cardId && (rec.newAvailableLimit ?? -1) >= 0,
-      title: rec.cardId
-        ? `Recomendamos: ${rec.card?.name}`
-        : 'Sin tarjeta sugerida',
-      message: rec.reason,
-      suggestedCardId: rec.cardId,
-      newAvailable: rec.newAvailableLimit,
-      utilization: rec.utilizationAfter,
+
+    // Tarjeta: usa la específica si se eligió; si no, la mejor tarjeta del ranking.
+    const chosenCard =
+      allCards.find((c) => c.id === values.selected_card_id) ??
+      allCards.find(
+        (c) => c.id === recommendation.ranked.find((o) => o.method === 'card')?.refId,
+      )
+    if (!chosenCard) {
+      return {
+        kind: 'card' as const,
+        ok: false,
+        risk: 'high' as PurchaseRisk,
+        verdict: 'cannot' as PurchaseVerdict,
+        title: 'Sin tarjeta disponible',
+        message: 'No tienes tarjetas registradas.',
+        recommendation,
+        suggestedCardId: null,
+      }
     }
-  }, [submitted, snap.data, accounts.data, cards.data])
+    const sim = simulateCreditCardPurchase({ amount, card: chosenCard, purchaseDate: date })
+    const cutoff = calculateCardCutoffImpact(chosenCard, date)
+    return {
+      kind: 'card' as const,
+      ok: sim.canAfford,
+      risk: sim.risk,
+      verdict: recommendation.verdict,
+      title: sim.canAfford
+        ? `Paga con ${chosenCard.name}`
+        : `${chosenCard.name} no tiene cupo`,
+      message: sim.reason,
+      suggestedCardId: chosenCard.id,
+      availableAfter: sim.availableAfter,
+      utilizationAfter: sim.utilizationAfter,
+      interestFreeDays: cutoff.interestFreeDays,
+      realPaymentDate: sim.realPaymentDate,
+      recommendation,
+    }
+  }, [submitted, snap.data, accounts.data, cards.data, emergencyMinimum])
 
   const onSubmit = form.handleSubmit(async (values) => {
     setSubmitted(values)
     try {
-      // Persiste
-      const r = result // se calculará en próximo render; guarda básico
       await save.mutateAsync({
         input_amount: values.input_amount,
         simulation_date: values.simulation_date,
@@ -126,8 +214,8 @@ export function SimulatorPage() {
         selected_account_id: values.selected_account_id ?? null,
         selected_card_id: values.selected_card_id ?? null,
         suggested_card_id: null,
-        can_afford: r?.ok ?? false,
-        impact_json: {},
+        can_afford: false, // se recalcula al render; valor informativo
+        impact_json: { necessary: values.necessary ?? true },
         note: values.note ?? null,
       })
     } catch (e) {
@@ -135,205 +223,366 @@ export function SimulatorPage() {
     }
   })
 
+  // Convierte la simulación actual en una transacción real (gasto).
+  const convertToTransaction = async () => {
+    if (!submitted || !result) return
+    const v = submitted
+    try {
+      if (v.payment_option === 'card') {
+        await createTx.mutateAsync({
+          date: v.simulation_date,
+          amount: v.input_amount,
+          kind: 'expense',
+          credit_card_id: result.suggestedCardId,
+          account_id: null,
+          counterparty_account_id: null,
+          category_id: null,
+          debt_id: null,
+          debt_installment_id: null,
+          note: v.note || 'Compra simulada',
+          installments_count:
+            (v.installments_count ?? 1) > 1 ? v.installments_count : null,
+        })
+      } else {
+        const accountId =
+          v.payment_option === 'account'
+            ? v.selected_account_id ?? null
+            : accounts.data?.find((a) => !a.archived)?.id ?? null
+        await createTx.mutateAsync({
+          date: v.simulation_date,
+          amount: v.input_amount,
+          kind: 'expense',
+          account_id: accountId,
+          counterparty_account_id: null,
+          credit_card_id: null,
+          category_id: null,
+          debt_id: null,
+          debt_installment_id: null,
+          note: v.note || 'Compra simulada',
+        })
+      }
+      toast.success('Transacción registrada')
+    } catch (e) {
+      toast.error((e as Error).message ?? 'No se pudo convertir')
+    }
+  }
+
   const paymentOption = form.watch('payment_option') as PaymentOption
+  const necessary = form.watch('necessary')
+  const installmentsCount = form.watch('installments_count')
+  const inputAmount = form.watch('input_amount')
+
+  const paymentChips: { v: PaymentOption; l: string; emoji: string }[] = [
+    { v: 'cash', l: 'Efectivo', emoji: '💵' },
+    { v: 'account', l: 'Cuenta', emoji: '🏦' },
+    { v: 'card', l: 'Tarjeta', emoji: '💳' },
+  ]
+
+  // Píldora suave para selects/inputs (sin borde duro).
+  const pillField =
+    'h-12 w-full rounded-2xl border-0 bg-secondary px-4 text-base focus:outline-none focus:ring-2 focus:ring-ring/40'
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
         title="Simulador de compra"
-        description="¿Puedes comprarlo? Te decimos el impacto y la mejor tarjeta."
+        description="¿Puedes comprarlo? Te decimos el impacto y la mejor forma de pago."
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Datos de la compra</CardTitle>
-            <CardDescription>Ingresa monto, fecha y forma de pago.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={onSubmit} noValidate>
-              <FormField
-                label="Valor de la compra"
-                error={form.formState.errors.input_amount?.message}
-              >
-                <MoneyInput
-                  value={form.watch('input_amount')}
-                  onChange={(v) =>
-                    form.setValue('input_amount', v, { shouldValidate: true })
-                  }
-                />
-              </FormField>
+      <div className="grid gap-8 lg:grid-cols-2">
+        {/* ---------- Formulario ---------- */}
+        <form className="space-y-6" onSubmit={onSubmit} noValidate>
+          {/* Valor de la compra — número protagonista */}
+          <div className="space-y-1.5">
+            <p className="text-sm font-semibold text-muted-foreground">
+              Valor de la compra
+            </p>
+            <MoneyInput
+              value={inputAmount}
+              onChange={(v) =>
+                form.setValue('input_amount', v, { shouldValidate: true })
+              }
+              className="h-auto border-0 bg-transparent p-0 text-hero text-4xl text-foreground placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-5xl"
+            />
+            {form.formState.errors.input_amount?.message && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.input_amount.message}
+              </p>
+            )}
+          </div>
 
-              <FormField
-                label="Fecha de la compra"
-                htmlFor="simulation_date"
-                error={form.formState.errors.simulation_date?.message}
-              >
-                <Input
-                  id="simulation_date"
-                  type="date"
-                  {...form.register('simulation_date')}
-                />
-              </FormField>
-
-              <FormField label="Forma de pago">
-                <RadioGroup
-                  value={paymentOption}
-                  onValueChange={(v) =>
-                    form.setValue('payment_option', v as PaymentOption)
-                  }
-                  className="grid grid-cols-3 gap-2"
-                >
-                  {(
-                    [
-                      { v: 'cash', l: 'Efectivo' },
-                      { v: 'account', l: 'Cuenta' },
-                      { v: 'card', l: 'Tarjeta' },
-                    ] as { v: PaymentOption; l: string }[]
-                  ).map((o) => (
-                    <Label
-                      key={o.v}
-                      className={`flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm ${paymentOption === o.v ? 'border-primary bg-accent' : ''}`}
-                    >
-                      <RadioGroupItem value={o.v} />
-                      {o.l}
-                    </Label>
-                  ))}
-                </RadioGroup>
-              </FormField>
-
-              {paymentOption === 'account' && (
-                <FormField label="Cuenta">
-                  <Select
-                    value={form.watch('selected_account_id') ?? ''}
-                    onValueChange={(v) =>
-                      form.setValue('selected_account_id', v || null)
-                    }
+          {/* Forma de pago — chips seleccionables */}
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-muted-foreground">
+              Forma de pago
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {paymentChips.map((o) => {
+                const active = paymentOption === o.v
+                return (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => form.setValue('payment_option', o.v)}
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 rounded-2xl px-3 py-3 text-sm font-bold transition-all active:scale-[0.97]',
+                      active
+                        ? 'bg-foreground text-background'
+                        : 'bg-secondary text-foreground',
+                    )}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(accounts.data ?? []).map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FormField>
-              )}
+                    <span aria-hidden>{o.emoji}</span>
+                    {o.l}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
-              <Button type="submit" className="w-full">
-                <Sparkles className="mr-2 h-4 w-4" />
-                Simular
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+          {/* ¿Necesaria? — píldora con switch */}
+          <div className="flex items-center justify-between rounded-2xl bg-secondary px-4 py-3.5">
+            <span className="text-sm font-bold">¿Es una compra necesaria?</span>
+            <Switch
+              checked={!!necessary}
+              onCheckedChange={(v) => form.setValue('necessary', v)}
+            />
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Resultado</CardTitle>
-            <CardDescription>
-              Impacto en tu disponible, deuda y recomendación.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {!result ? (
+          {/* Fecha */}
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-muted-foreground">
+              Fecha de la compra
+            </p>
+            <input
+              id="simulation_date"
+              type="date"
+              {...form.register('simulation_date')}
+              className={pillField}
+            />
+            {form.formState.errors.simulation_date?.message && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.simulation_date.message}
+              </p>
+            )}
+          </div>
+
+          {/* Cuenta */}
+          {paymentOption === 'account' && (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-muted-foreground">Cuenta</p>
+              <Select
+                value={form.watch('selected_account_id') ?? ''}
+                onValueChange={(v) =>
+                  form.setValue('selected_account_id', v || null)
+                }
+              >
+                <SelectTrigger className={pillField}>
+                  <SelectValue placeholder="Selecciona…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(accounts.data ?? []).map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Tarjeta + cuotas */}
+          {paymentOption === 'card' && (
+            <>
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-muted-foreground">
+                  Tarjeta (vacío = mejor sugerida)
+                </p>
+                <Select
+                  value={form.watch('selected_card_id') ?? '__auto'}
+                  onValueChange={(v) =>
+                    form.setValue('selected_card_id', v === '__auto' ? null : v)
+                  }
+                >
+                  <SelectTrigger className={pillField}>
+                    <SelectValue placeholder="Mejor sugerida" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto">Mejor sugerida</SelectItem>
+                    {(cards.data ?? []).map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-muted-foreground">
+                  Cuotas (1 = sin diferir)
+                </p>
+                <input
+                  type="number"
+                  min={1}
+                  value={installmentsCount ?? 1}
+                  onChange={(e) =>
+                    form.setValue(
+                      'installments_count',
+                      e.target.value ? Number(e.target.value) : 1,
+                    )
+                  }
+                  className={pillField}
+                />
+              </div>
+            </>
+          )}
+
+          <Button type="submit" size="lg" className="w-full">
+            <Sparkles className="h-5 w-5" strokeWidth={2.5} />
+            Simular
+          </Button>
+        </form>
+
+        {/* ---------- Resultado ---------- */}
+        <div className="space-y-4">
+          {!result ? (
+            <div className="flex min-h-[12rem] items-center justify-center rounded-3xl bg-card px-6 py-10 text-center shadow-soft">
               <p className="text-sm text-muted-foreground">
                 Ingresa los datos y presiona simular.
               </p>
-            ) : (
-              <>
-                <Alert variant={result.ok ? 'success' : 'destructive'}>
-                  <ShoppingCart className="h-4 w-4" />
-                  <AlertTitle>{result.title}</AlertTitle>
-                  <AlertDescription>{result.message}</AlertDescription>
-                </Alert>
-
-                {paymentOption === 'card' && result.suggestedCardId && (
-                  <div className="rounded-md border p-3 text-sm">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="font-medium">
-                        {cards.data?.find((c) => c.id === result.suggestedCardId)
-                          ?.name}
-                      </span>
-                      <Badge variant="secondary">
-                        cupo nuevo:{' '}
-                        <MoneyDisplay
-                          value={result.newAvailable ?? 0}
-                          className="ml-1"
-                        />
-                      </Badge>
-                    </div>
-                    {result.utilization !== undefined && (
-                      <p className="text-xs text-muted-foreground">
-                        Utilización post-compra:{' '}
-                        {Math.round(result.utilization * 100)}%
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {paymentOption === 'card' && (cards.data ?? []).length > 0 && (
-                  <div className="space-y-2 text-xs">
-                    <p className="font-medium">Comparación rápida</p>
-                    {(cards.data ?? []).map((c) => {
-                      const av = calculateAvailableCardLimit(c)
-                      return (
-                        <div
-                          key={c.id}
-                          className="flex justify-between border-b pb-1 last:border-0"
-                        >
-                          <span>{c.name}</span>
-                          <span>
-                            cupo <MoneyDisplay value={av} />, corte día{' '}
-                            {c.statement_day}, pago día {c.payment_due_day}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Últimas simulaciones</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {!sims.data || sims.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aún no has simulado nada.
-            </p>
+            </div>
           ) : (
-            sims.data.map((s) => (
+            <>
+              {/* Veredicto — bloque semáforo dominante */}
               <div
-                key={s.id}
-                className="flex items-center justify-between rounded-md border p-2 text-sm"
+                className={cn(
+                  'rounded-3xl px-5 py-6 shadow-soft',
+                  verdictBlock[result.verdict],
+                )}
               >
-                <div>
-                  <MoneyDisplay
-                    value={Number(s.input_amount)}
-                    className="font-medium"
-                  />
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {formatDateShort(s.simulation_date)} · {s.payment_option}
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl" aria-hidden>
+                    {verdictEmoji[result.verdict]}
+                  </span>
+                  <span className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+                    {verdictLabel[result.verdict]}
                   </span>
                 </div>
-                <Badge variant={s.can_afford ? 'success' : 'destructive'}>
-                  {s.can_afford ? 'Podías comprar' : 'No alcanzaba'}
-                </Badge>
+                <p className="mt-2 text-sm font-bold opacity-90">{result.title}</p>
+                <p className="mt-1 text-sm opacity-80">{result.message}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      'inline-flex items-center rounded-full px-3 py-1 text-xs font-bold',
+                      riskChip[result.risk],
+                    )}
+                  >
+                    {riskLabel[result.risk]}
+                  </span>
+                </div>
               </div>
-            ))
+
+              {/* Razón de la recomendación */}
+              {result.recommendation?.reason && (
+                <div className="rounded-2xl bg-card px-4 py-3 text-sm shadow-soft">
+                  {result.recommendation.reason}
+                </div>
+              )}
+
+              {/* Detalle de tarjeta */}
+              {result.kind === 'card' && result.suggestedCardId && (
+                <div className="space-y-1.5 rounded-2xl bg-card px-4 py-3 shadow-soft">
+                  <p className="text-xs text-muted-foreground">
+                    Cupo después:{' '}
+                    <MoneyDisplay value={result.availableAfter ?? 0} /> ·
+                    utilización {Math.round((result.utilizationAfter ?? 0) * 100)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {result.interestFreeDays} días sin interés · pagarías el{' '}
+                    {result.realPaymentDate
+                      ? formatDateShort(result.realPaymentDate)
+                      : '—'}
+                  </p>
+                </div>
+              )}
+
+              {/* Comparación de medios — filas-píldora */}
+              {result.recommendation && (
+                <div className="space-y-2.5">
+                  <p className="text-sm font-extrabold tracking-tight">
+                    Comparación de medios
+                  </p>
+                  <div className="space-y-2">
+                    {result.recommendation.ranked.slice(0, 5).map((o) => (
+                      <div
+                        key={`${o.method}-${o.refId ?? 'x'}`}
+                        className="flex items-center justify-between rounded-2xl bg-card px-4 py-3 shadow-soft"
+                      >
+                        <span className="text-sm font-bold">{o.label}</span>
+                        <span
+                          className={cn(
+                            'inline-flex items-center rounded-full px-3 py-1 text-xs font-bold',
+                            o.canAfford
+                              ? riskChip[o.risk]
+                              : 'bg-primary text-primary-foreground',
+                          )}
+                        >
+                          {o.canAfford ? riskLabel[o.risk] : 'No alcanza'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Convertir en transacción real */}
+              {result.ok && (
+                <Button
+                  variant="pill"
+                  size="lg"
+                  className="w-full"
+                  onClick={convertToTransaction}
+                  disabled={createTx.isPending}
+                >
+                  <Check className="h-5 w-5" strokeWidth={2.5} />
+                  Convertir en transacción real
+                </Button>
+              )}
+            </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
+      {/* ---------- Últimas simulaciones ---------- */}
+      <div className="space-y-3">
+        <h2 className="text-xl font-extrabold tracking-tight">
+          Últimas simulaciones
+        </h2>
+        {!sims.data || sims.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Aún no has simulado nada.</p>
+        ) : (
+          <MotionList className="space-y-2.5">
+            {sims.data.map((s) => (
+              <MotionItem key={s.id}>
+                <div className="flex items-center justify-between rounded-2xl bg-card px-4 py-3 shadow-soft">
+                  <div className="min-w-0">
+                    <MoneyDisplay
+                      value={Number(s.input_amount)}
+                      className="text-lg font-extrabold tnum"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatDateShort(s.simulation_date)} · {s.payment_option}
+                    </p>
+                  </div>
+                </div>
+              </MotionItem>
+            ))}
+          </MotionList>
+        )}
+      </div>
     </div>
   )
+}
+
+function fmt(n: number): string {
+  return `$${n.toLocaleString('es-CO')}`
 }

@@ -1,5 +1,6 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { CreditCard } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +20,14 @@ interface Props {
   onCancel?: () => void
   submitLabel?: string
 }
+
+// Input/MoneyInput como píldora suave (sin caja con borde duro).
+const pillInput =
+  'h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus-visible:ring-2 focus-visible:ring-ring/40'
+
+// Textarea como píldora suave.
+const pillTextarea =
+  'rounded-2xl border-0 bg-secondary px-4 py-3 text-base focus-visible:ring-2 focus-visible:ring-ring/40'
 
 export function CreditCardForm({
   initial,
@@ -48,22 +57,55 @@ export function CreditCardForm({
     }
   })
 
+  // Color elegido en vivo (refleja la selección del ColorPicker).
+  const accentColor = form.watch('color') || 'hsl(var(--primary))'
+  const previewName = form.watch('name')?.trim()
+  const previewBank = form.watch('bank')?.trim()
+
   return (
-    <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-      <div className="grid gap-4 sm:grid-cols-2">
+    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+      {/* Preview en vivo: el acento se pinta con el color elegido. */}
+      <div
+        className="flex items-center gap-3 rounded-2xl bg-secondary px-4 py-3"
+        style={{ borderLeft: `4px solid ${accentColor}` }}
+      >
+        <span
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full"
+          style={{ backgroundColor: accentColor }}
+        >
+          <CreditCard className="h-5 w-5 text-black/70" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold">
+            {previewName || 'Nueva tarjeta'}
+          </p>
+          {previewBank && (
+            <p className="truncate text-xs text-muted-foreground">
+              {previewBank}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Nombre"
           htmlFor="name"
           error={form.formState.errors.name?.message}
         >
-          <Input id="name" {...form.register('name')} placeholder="Visa Bancolombia" />
+          <Input
+            id="name"
+            {...form.register('name')}
+            placeholder="Visa Bancolombia"
+            className={pillInput}
+          />
         </FormField>
         <FormField label="Banco" htmlFor="bank">
-          <Input id="bank" {...form.register('bank')} />
+          <Input id="bank" {...form.register('bank')} className={pillInput} />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Cupo total"
           error={form.formState.errors.credit_limit?.message}
@@ -73,6 +115,7 @@ export function CreditCardForm({
             onChange={(v) =>
               form.setValue('credit_limit', v, { shouldValidate: true })
             }
+            className={pillInput}
           />
         </FormField>
         <FormField
@@ -84,11 +127,12 @@ export function CreditCardForm({
             onChange={(v) =>
               form.setValue('current_debt', v, { shouldValidate: true })
             }
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField
           label="Día de corte (1-31)"
           htmlFor="statement_day"
@@ -100,6 +144,7 @@ export function CreditCardForm({
             min={1}
             max={31}
             {...form.register('statement_day', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
         <FormField
@@ -113,31 +158,39 @@ export function CreditCardForm({
             min={1}
             max={31}
             {...form.register('payment_due_day', { valueAsNumber: true })}
+            className={pillInput}
           />
         </FormField>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Color" htmlFor="color">
-          <ColorPicker
-            id="color"
-            value={form.watch('color')}
-            onChange={(hex) => form.setValue('color', hex, { shouldValidate: true })}
-          />
-        </FormField>
-      </div>
-
-      <FormField label="Observaciones" htmlFor="notes">
-        <Textarea id="notes" rows={2} {...form.register('notes')} />
+      <FormField label="Color" htmlFor="color">
+        <ColorPicker
+          id="color"
+          value={form.watch('color')}
+          onChange={(hex) => form.setValue('color', hex, { shouldValidate: true })}
+        />
       </FormField>
 
-      <div className="flex justify-end gap-2">
+      <FormField label="Observaciones" htmlFor="notes">
+        <Textarea
+          id="notes"
+          rows={2}
+          {...form.register('notes')}
+          className={pillTextarea}
+        />
+      </FormField>
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancelar
           </Button>
         )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
+        <Button
+          type="submit"
+          disabled={form.formState.isSubmitting}
+          className="w-full sm:w-auto"
+        >
           {submitLabel}
         </Button>
       </div>

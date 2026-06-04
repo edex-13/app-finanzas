@@ -7,8 +7,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { paths } from '@/routes/paths'
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
-import { AccountsPage } from '@/features/accounts/AccountsPage'
-import { CreditCardsPage } from '@/features/credit-cards/CreditCardsPage'
+import { WalletPage } from '@/features/wallet/WalletPage'
 import { DebtsPage } from '@/features/debts/DebtsPage'
 import { IncomePage } from '@/features/income/IncomePage'
 import { TransactionsPage } from '@/features/transactions/TransactionsPage'
@@ -33,8 +32,10 @@ const router = createBrowserRouter([
             element: <AppShell />,
             children: [
               { path: paths.dashboard, element: <DashboardPage /> },
-              { path: paths.accounts, element: <AccountsPage /> },
-              { path: paths.cards, element: <CreditCardsPage /> },
+              { path: paths.wallet, element: <WalletPage /> },
+              // Rutas antiguas → redirigen a la página unificada
+              { path: paths.accounts, element: <Navigate to={paths.wallet} replace /> },
+              { path: paths.cards, element: <Navigate to={`${paths.wallet}?tab=cards`} replace /> },
               { path: paths.debts, element: <DebtsPage /> },
               { path: paths.income, element: <IncomePage /> },
               { path: paths.transactions, element: <TransactionsPage /> },
