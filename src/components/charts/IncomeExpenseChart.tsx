@@ -12,16 +12,19 @@ import { formatMoney } from '@/lib/format'
 interface Props {
   income: number
   expense: number
+  /** Tocar una barra (p. ej. para ver esos movimientos filtrados). */
+  onBarClick?: (which: 'income' | 'expense') => void
 }
 
 /**
  * Mini-comparativa Ingresos vs Gastos del periodo. Dos barras muy redondeadas:
  * verde pastel para ingreso, coral para gasto (alerta visual del flujo de salida).
+ * Si recibe onBarClick, cada barra es tocable.
  */
-export function IncomeExpenseChart({ income, expense }: Props) {
+export function IncomeExpenseChart({ income, expense, onBarClick }: Props) {
   const data = [
-    { name: 'Ingresos', value: income, fill: 'hsl(var(--pastel-mint))' },
-    { name: 'Gastos', value: expense, fill: 'hsl(var(--destructive))' },
+    { name: 'Ingresos', key: 'income' as const, value: income, fill: 'hsl(var(--pastel-mint))' },
+    { name: 'Gastos', key: 'expense' as const, value: expense, fill: 'hsl(var(--destructive))' },
   ]
   return (
     <div className="h-[160px] w-full">
@@ -37,7 +40,13 @@ export function IncomeExpenseChart({ income, expense }: Props) {
             cursor={{ fill: 'hsl(var(--muted))', radius: 16 }}
             content={(props) => <SoftTooltip {...props} />}
           />
-          <Bar dataKey="value" radius={[16, 16, 16, 16]} maxBarSize={64}>
+          <Bar
+            dataKey="value"
+            radius={[16, 16, 16, 16]}
+            maxBarSize={64}
+            onClick={(_, index) => onBarClick?.(data[index].key)}
+            cursor={onBarClick ? 'pointer' : undefined}
+          >
             {data.map((d) => (
               <Cell key={d.name} fill={d.fill} />
             ))}

@@ -17,6 +17,7 @@ import { MoneyInput } from '@/components/common/MoneyInput'
 import { debtSchema, type DebtInput } from '@/lib/validations'
 import type { DebtRow } from '@/types/database'
 import { toISODate, today } from '@/lib/date-utils'
+import { useCreditCards } from '@/features/credit-cards/hooks'
 
 interface Props {
   initial?: DebtRow
@@ -58,6 +59,7 @@ export function DebtForm({
   onCancel,
   submitLabel = 'Guardar',
 }: Props) {
+  const { data: cards = [] } = useCreditCards()
   const form = useForm<DebtInput>({
     resolver: zodResolver(debtSchema),
     defaultValues: {
@@ -214,6 +216,30 @@ export function DebtForm({
           />
         </FormField>
       </div>
+
+      <FormField label="¿Con qué tarjeta la pagas? (opcional)">
+        <Select
+          value={form.watch('payment_method_card_id') ?? '__none'}
+          onValueChange={(v) =>
+            form.setValue(
+              'payment_method_card_id',
+              v === '__none' ? null : v,
+            )
+          }
+        >
+          <SelectTrigger className={pillTrigger}>
+            <SelectValue placeholder="Ninguna" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none">Ninguna</SelectItem>
+            {cards.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
 
       <div className="grid gap-5 sm:grid-cols-3">
         <FormField label="Cuotas totales" htmlFor="total_installments">

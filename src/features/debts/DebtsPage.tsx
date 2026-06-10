@@ -14,12 +14,14 @@ import { DebtForm } from './DebtForm'
 import { DebtDetail } from './DebtDetail'
 import {
   useCreateDebt,
+  useDebtInstallments,
   useDebts,
   useDeleteDebt,
   useUpdateDebt,
 } from './hooks'
+import { recalculateDebtProgress } from '@/lib/financial-calculations'
 import { formatDateShort } from '@/lib/date-utils'
-import type { DebtRow } from '@/types/database'
+import type { DebtInstallmentRow, DebtRow } from '@/types/database'
 
 const typeLabel: Record<DebtRow['debt_type'], string> = {
   loan: 'Préstamo',
@@ -38,6 +40,7 @@ const freqLabel = {
 
 export function DebtsPage() {
   const { data, isLoading } = useDebts()
+  const { data: allInstallments } = useDebtInstallments()
   const create = useCreateDebt()
   const update = useUpdateDebt()
   const del = useDeleteDebt()
@@ -95,13 +98,30 @@ export function DebtsPage() {
       ) : (
         <MotionList className="grid gap-3 sm:grid-cols-2">
           {data.map((d) => {
-            const progress =
-              d.total_amount > 0
+            // Las cuotas son la fuente de verdad del avance (consistente con el
+            // detalle). Si la deuda no tiene cuotas generadas, caemos al saldo.
+            const debtInstallments = (allInstallments ?? []).filter(
+              (i: DebtInstallmentRow) => i.debt_id === d.id,
+            )
+            const hasInstallments = debtInstallments.length > 0
+            const prog = recalculateDebtProgress(
+              Number(d.total_amount),
+              debtInstallments,
+            )
+            const progress = hasInstallments
+              ? prog.progress
+              : d.total_amount > 0
                 ? Math.min(
                     1,
                     Math.max(0, 1 - d.remaining_balance / d.total_amount),
                   )
                 : 0
+            const remainingBalance = hasInstallments
+              ? prog.remainingAmount
+              : Number(d.remaining_balance)
+            const remainingLabel = hasInstallments
+              ? `${prog.paidCount}/${debtInstallments.length} cuotas`
+              : `${d.remaining_installments ?? '?'} cuotas restantes`
             return (
               <MotionItem key={d.id}>
               <Card>
@@ -126,7 +146,7 @@ export function DebtsPage() {
                         Saldo pendiente
                       </p>
                       <MoneyDisplay
-                        value={Number(d.remaining_balance)}
+                        value={remainingBalance}
                         className="font-semibold"
                       />
                     </div>
@@ -144,9 +164,7 @@ export function DebtsPage() {
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Avance</span>
-                      <span>
-                        {d.remaining_installments ?? '?'} cuotas restantes
-                      </span>
+                      <span>{remainingLabel}</span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div

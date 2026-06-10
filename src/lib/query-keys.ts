@@ -12,6 +12,7 @@ export const qk = {
   installmentsByDebt: (userId: string, debtId: string) =>
     ['debt_installments', userId, debtId] as const,
   income: (userId: string) => ['income_sources', userId] as const,
+  salaryHistory: (userId: string) => ['salary_history', userId] as const,
   salaryPeriods: (userId: string) => ['salary_periods', userId] as const,
   categories: (userId: string) => ['categories', userId] as const,
   recurring: (userId: string) => ['recurring_transactions', userId] as const,

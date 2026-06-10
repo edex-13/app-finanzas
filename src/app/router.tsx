@@ -49,7 +49,11 @@ const router = createBrowserRouter([
     ],
   },
   { path: '*', element: <Navigate to={paths.dashboard} replace /> },
-])
+], {
+  // En GitHub Pages la app vive bajo /<repo>/; BASE_URL la define Vite según
+  // la base de compilación ('/' en dev). Sin slash final para react-router.
+  basename: import.meta.env.BASE_URL.replace(/\/$/, '') || '/',
+})
 
 export function AppRouter() {
   return <RouterProvider router={router} />

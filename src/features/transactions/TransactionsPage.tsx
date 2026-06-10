@@ -59,7 +59,6 @@ import {
 import { useAccounts } from '@/features/accounts/hooks'
 import { useCreditCards } from '@/features/credit-cards/hooks'
 import { formatDateShort, today, toISODate } from '@/lib/date-utils'
-import { formatMoneyCompact } from '@/lib/format'
 import {
   aggregateSpendingByCategory,
   calculateTransactionImpact,
@@ -127,6 +126,8 @@ export function TransactionsPage() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   // Inputs de fecha personalizados (atajo "Elegir…"): revelados bajo demanda.
   const [showDatePicker, setShowDatePicker] = useState(false)
+  // "En qué gastas": por defecto solo 6 filas; "Ver más" revela el resto.
+  const [showAllSpend, setShowAllSpend] = useState(false)
 
   const { data: txs, isLoading } = useTransactions(filters)
   const { data: categories = [] } = useCategories()
@@ -140,12 +141,15 @@ export function TransactionsPage() {
   const delRec = useDeleteRecurring()
   const materialize = useMaterializeRecurring()
 
+  // Misma semántica que la gráfica: gasto = expense + cuotas de deuda.
+  // card_payment se excluye (el consumo ya se contó al comprar con tarjeta).
   const totals = useMemo(() => {
     if (!txs) return { income: 0, expense: 0 }
     return txs.reduce(
       (acc, t) => {
         if (t.kind === 'income') acc.income += Number(t.amount)
-        else if (t.kind === 'expense') acc.expense += Number(t.amount)
+        else if (t.kind === 'expense' || t.kind === 'debt_payment')
+          acc.expense += Number(t.amount)
         return acc
       },
       { income: 0, expense: 0 },
@@ -160,13 +164,13 @@ export function TransactionsPage() {
   )
 
   // Categoría sobre las MISMAS transacciones visibles: alimenta la gráfica de
-  // barras (top 6) que también actúa como selector de categoría. Se adapta al
+  // distribución que también actúa como selector de categoría. Se adapta al
   // flujo activo: si miras Ingresos agrega ingresos; si no, gastos/egresos.
+  // Pagar la tarjeta NO es un gasto nuevo: el consumo ya se contó cuando se
+  // hizo la compra con la tarjeta; contarlo aquí duplicaría el gasto.
   const spendKinds = useMemo(
     () =>
-      filters.flow === 'in'
-        ? ['income']
-        : ['expense', 'debt_payment', 'card_payment'],
+      filters.flow === 'in' ? ['income'] : ['expense', 'debt_payment'],
     [filters.flow],
   )
   const spending = useMemo(
@@ -180,6 +184,11 @@ export function TransactionsPage() {
   const spendTitle = filters.flow === 'in' ? 'De dónde viene' : 'En qué gastas'
   const spendMax = useMemo(
     () => spending.reduce((m, s) => Math.max(m, s.amount), 0),
+    [spending],
+  )
+  // Total del periodo (suma de lo visible): da contexto al lado del título.
+  const spendTotal = useMemo(
+    () => spending.reduce((sum, s) => sum + s.amount, 0),
     [spending],
   )
 
@@ -360,47 +369,94 @@ export function TransactionsPage() {
             )}
           </div>
 
-          {/* 3) Gasto por categoría: barras que también filtran al tocarlas.
+          {/* 3) Gasto por categoría: barra de distribución apilada (el "mapa"
+              del gasto de un vistazo) + filas-píldora que filtran al tocarlas.
               Se muestra SIEMPRE; si no hay gastos, estado vacío sutil. */}
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <FilterLabel>{spendTitle}</FilterLabel>
-              {filters.categoryId && (
-                <button
-                  type="button"
-                  onClick={() => setFilter('categoryId', undefined)}
-                  className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[11px] font-bold text-muted-foreground active:scale-[0.97]"
-                >
-                  <X className="h-3 w-3" />
-                  Quitar
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {filters.categoryId && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter('categoryId', undefined)}
+                    className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[11px] font-bold text-muted-foreground active:scale-[0.97]"
+                  >
+                    <X className="h-3 w-3" />
+                    Quitar
+                  </button>
+                )}
+                {/* Total del periodo: discreto pero firme, junto al título. */}
+                <MoneyDisplay
+                  value={spendTotal}
+                  className="text-sm font-extrabold tnum"
+                />
+              </div>
             </div>
             {spending.length > 0 ? (
-              <div className="nice-scroll -mx-1 overflow-x-auto px-1 pb-1">
-                <div className="flex items-end gap-3">
+              <div className="space-y-2.5">
+                {/* Mapa apilado: un segmento por categoría, ancho = share. */}
+                <div className="flex h-3 w-full gap-px overflow-hidden rounded-full bg-secondary">
                   {spending.map((s) => (
-                    <SpendBar
+                    <div
                       key={s.categoryId ?? '__none'}
-                      spend={s}
-                      max={spendMax}
-                      active={filters.categoryId === s.categoryId}
-                      dimmed={
+                      className={cn(
+                        'h-full transition-opacity',
                         !!filters.categoryId &&
-                        filters.categoryId !== s.categoryId
-                      }
-                      onClick={() =>
-                        s.categoryId &&
-                        setFilter(
-                          'categoryId',
-                          filters.categoryId === s.categoryId
-                            ? undefined
-                            : s.categoryId,
-                        )
-                      }
+                          filters.categoryId !== s.categoryId &&
+                          'opacity-30',
+                      )}
+                      style={{
+                        width: `${Math.max(s.share * 100, 1.5)}%`,
+                        backgroundColor: categoryColor(s.color),
+                      }}
                     />
                   ))}
                 </div>
+
+                {/* Filas por categoría: máx. 6 visibles + "Ver más". */}
+                <div className="space-y-2">
+                  {(showAllSpend ? spending : spending.slice(0, 6)).map(
+                    (s) => (
+                      <SpendRow
+                        key={s.categoryId ?? '__none'}
+                        spend={s}
+                        max={spendMax}
+                        active={filters.categoryId === s.categoryId}
+                        dimmed={
+                          !!filters.categoryId &&
+                          filters.categoryId !== s.categoryId
+                        }
+                        onClick={() =>
+                          s.categoryId &&
+                          setFilter(
+                            'categoryId',
+                            filters.categoryId === s.categoryId
+                              ? undefined
+                              : s.categoryId,
+                          )
+                        }
+                      />
+                    ),
+                  )}
+                </div>
+                {spending.length > 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSpend((v) => !v)}
+                    className="mx-auto flex items-center gap-1 text-xs font-semibold text-muted-foreground active:scale-[0.97]"
+                  >
+                    {showAllSpend
+                      ? 'Ver menos'
+                      : `Ver más (${spending.length - 6})`}
+                    <ChevronDown
+                      className={cn(
+                        'h-3.5 w-3.5 transition-transform',
+                        showAllSpend && 'rotate-180',
+                      )}
+                    />
+                  </button>
+                )}
               </div>
             ) : (
               <div className="rounded-2xl bg-card p-4 text-center text-xs font-semibold text-muted-foreground">
@@ -792,12 +848,10 @@ function DateChip({
   )
 }
 
-// Barra VERTICAL de categoría. Altura proporcional al monto (vs el máximo),
-// color real de la categoría. Tocarla filtra. Ancho fijo → scroll horizontal
-// cuando hay muchas categorías.
-const BAR_TRACK_H = 96 // px
-
-function SpendBar({
+// Fila-píldora de categoría: avatar con color real + nombre completo + mini
+// barra de progreso (proporcional al máximo del periodo) + monto y % a la
+// derecha. Tocarla filtra por esa categoría; tocarla de nuevo quita el filtro.
+function SpendRow({
   spend,
   max,
   active,
@@ -811,47 +865,53 @@ function SpendBar({
   onClick: () => void
 }) {
   const color = categoryColor(spend.color)
-  // Altura proporcional; mínimo visible para montos pequeños.
+  // Ancho proporcional a la categoría más grande; mínimo visible.
   const ratio = max > 0 ? spend.amount / max : 0
-  const barH = Math.max(Math.round(ratio * BAR_TRACK_H), 8)
   return (
     <button
       type="button"
       onClick={onClick}
-      title={`${spend.name}: ${formatMoneyCompact(spend.amount)}`}
       className={cn(
-        'flex w-[68px] shrink-0 flex-col items-center gap-2 rounded-2xl bg-card px-2 py-3 transition-opacity active:scale-[0.97]',
+        'flex w-full items-center gap-3 rounded-2xl bg-card px-4 py-3 text-left transition-opacity active:scale-[0.97]',
         dimmed && 'opacity-40',
         active && 'ring-2 ring-primary/60',
       )}
     >
-      {/* Monto arriba */}
-      <span className="text-[11px] font-extrabold tnum">
-        {formatMoneyCompact(spend.amount)}
-      </span>
-      {/* Pista vertical con relleno que crece hacia arriba */}
-      <div
-        className="flex w-7 items-end overflow-hidden rounded-full bg-secondary"
-        style={{ height: BAR_TRACK_H }}
-      >
-        <div
-          className="w-full rounded-full transition-[height]"
-          style={{ height: barH, backgroundColor: color }}
-        />
-      </div>
-      {/* Avatar de categoría abajo */}
+      {/* Avatar circular con el color real de la categoría */}
       <span
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-full"
         style={categoryTint(spend.color)}
       >
         {createElement(categoryIcon(spend.icon), {
-          className: 'h-4 w-4',
+          className: 'h-[18px] w-[18px]',
           strokeWidth: 2.5,
         })}
       </span>
-      <span className="w-full truncate text-center text-[10px] font-bold text-muted-foreground">
-        {spend.name}
-      </span>
+
+      {/* Nombre completo + mini barra de progreso */}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold">{spend.name}</p>
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className="h-full rounded-full transition-[width]"
+            style={{
+              width: `${Math.max(ratio * 100, 4)}%`,
+              backgroundColor: color,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Monto + porcentaje del total */}
+      <div className="shrink-0 text-right">
+        <MoneyDisplay
+          value={spend.amount}
+          className="block text-sm font-extrabold tnum"
+        />
+        <span className="text-[11px] text-muted-foreground">
+          {Math.round(spend.share * 100)}%
+        </span>
+      </div>
     </button>
   )
 }

@@ -27,9 +27,14 @@ export function useCreateCard() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (input: CreditCardInput) => {
+      // current_debt es derivado; al crear arranca igual al saldo de apertura.
       const { error } = await supabase
         .from('credit_cards')
-        .insert({ ...input, user_id: user!.id })
+        .insert({
+          ...input,
+          current_debt: input.opening_balance,
+          user_id: user!.id,
+        })
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.cards(user!.id) }),
@@ -47,9 +52,13 @@ export function useUpdateCard() {
       id: string
       input: CreditCardInput
     }) => {
+      // El saldo de apertura solo se fija al crear; la deuda es derivada y
+      // nunca se edita directo.
+      const rest: Partial<CreditCardInput> = { ...input }
+      delete rest.opening_balance
       const { error } = await supabase
         .from('credit_cards')
-        .update(input)
+        .update(rest)
         .eq('id', id)
       if (error) throw error
     },

@@ -33,6 +33,7 @@ const card = (
   name: overrides.name ?? 'Card',
   bank: 'Bank',
   credit_limit: overrides.credit_limit ?? 1_000_000,
+  opening_balance: overrides.opening_balance ?? overrides.current_debt ?? 0,
   current_debt: overrides.current_debt ?? 0,
   statement_day: overrides.statement_day ?? 15,
   payment_due_day: overrides.payment_due_day ?? 5,
@@ -507,7 +508,33 @@ describe('installment pure functions', () => {
     expect(r.remainingAmount).toBe(500)
     expect(r.progress).toBe(0.5)
   })
+
+  it('debtRemainingFromInstallments suma solo las no pagadas', () => {
+    expect(
+      debtRemainingFromInstallments([
+        { amount: 250, status: 'paid' },
+        { amount: 250, status: 'pending' },
+        { amount: 250, status: 'overdue' },
+        { amount: 250, status: 'cancelled' },
+      ]),
+    ).toBe(500)
+  })
+
+  it('computeCardDebt deriva saldo = apertura + cargos − pagos (no negativo)', () => {
+    expect(
+      computeCardDebt({ openingBalance: 100, charges: 600, payments: 200 }),
+    ).toBe(500)
+    // los pagos nunca dejan el saldo por debajo de 0
+    expect(
+      computeCardDebt({ openingBalance: 0, charges: 100, payments: 500 }),
+    ).toBe(0)
+  })
 })
+
+import {
+  debtRemainingFromInstallments,
+  computeCardDebt,
+} from '../financial-calculations'
 
 import {
   simulateCashPurchase,

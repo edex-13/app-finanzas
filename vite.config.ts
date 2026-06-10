@@ -4,7 +4,12 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 
+// Base pública de la app. En GitHub Pages el sitio vive bajo /<repo>/, así
+// que el CI compila con VITE_BASE=/app-finanzas/. En dev/local queda '/'.
+const base = process.env.VITE_BASE ?? '/'
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -25,25 +30,27 @@ export default defineConfig({
         background_color: '#0f172a',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+        // Scope y arranque siguen la base (raíz local o /app-finanzas/ en Pages).
+        scope: base,
+        start_url: base,
         lang: 'es-CO',
         categories: ['finance', 'productivity'],
         icons: [
+          // Rutas RELATIVAS: se resuelven bajo la base, no en la raíz del host.
           {
-            src: '/icons/icon-192.png',
+            src: 'icons/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: '/icons/icon-512.png',
+            src: 'icons/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: '/icons/maskable-512.png',
+            src: 'icons/maskable-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',

@@ -41,9 +41,13 @@ export function useUpdateAccount() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, input }: { id: string; input: AccountInput }) => {
+      // El saldo solo se fija al crear; después se mueve con transacciones
+      // (o un movimiento de Ajuste). Nunca se edita directo.
+      const rest: Partial<AccountInput> = { ...input }
+      delete rest.balance
       const { error } = await supabase
         .from('accounts')
-        .update(input)
+        .update(rest)
         .eq('id', id)
       if (error) throw error
     },

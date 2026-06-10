@@ -14,13 +14,16 @@ interface Props {
   data: CategorySpend[]
   /** Total a mostrar en el centro de la dona. */
   total: number
+  /** Tocar un segmento de la dona (p. ej. para filtrar por esa categoría). */
+  onSliceClick?: (spend: CategorySpend) => void
 }
 
 /**
  * Dona de "gasto por categoría" con los COLORES REALES de cada categoría.
  * Sin leyenda densa: el desglose con chips va al lado en el dashboard.
+ * Si recibe onSliceClick, cada segmento es tocable.
  */
-export function CategorySpendChart({ data, total }: Props) {
+export function CategorySpendChart({ data, total, onSliceClick }: Props) {
   if (data.length === 0) {
     return (
       <div className="grid h-[200px] place-items-center text-sm text-muted-foreground">
@@ -42,6 +45,8 @@ export function CategorySpendChart({ data, total }: Props) {
             outerRadius={88}
             paddingAngle={2}
             stroke="none"
+            onClick={(_, index) => onSliceClick?.(data[index])}
+            cursor={onSliceClick ? 'pointer' : undefined}
           >
             {data.map((d) => (
               <Cell key={d.categoryId ?? 'none'} fill={categoryColor(d.color)} />

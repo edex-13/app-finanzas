@@ -75,6 +75,9 @@ export interface CreditCardRow {
   name: string
   bank: string | null
   credit_limit: number
+  /** Saldo de apertura (lo que ya se debía al registrar la tarjeta). */
+  opening_balance: number
+  /** Saldo derivado = opening_balance + cargos − pagos. No editar a mano. */
   current_debt: number
   statement_day: number
   payment_due_day: number
@@ -134,6 +137,17 @@ export interface IncomeSourceRow {
   includes_legal_benefits: boolean
   archived: boolean
   notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SalaryHistoryRow {
+  id: string
+  user_id: string
+  income_source_id: string
+  monthly_amount: number
+  /** Desde cuándo rige este sueldo; el tramo termina donde empieza el siguiente. */
+  start_date: string
   created_at: string
   updated_at: string
 }

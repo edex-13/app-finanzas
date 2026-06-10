@@ -81,16 +81,19 @@ export function usePayInstallment() {
     mutationFn: async ({
       installmentId,
       accountId,
+      payWithCardId,
       date,
     }: {
       installmentId: string
       accountId?: string | null
+      payWithCardId?: string | null
       date?: string
     }) => {
       const { error } = await supabase.rpc('pay_installment', {
         p_installment_id: installmentId,
         p_account_id: accountId ?? null,
         p_date: date ?? null,
+        p_pay_with_card_id: payWithCardId ?? null,
       })
       if (error) throw error
     },

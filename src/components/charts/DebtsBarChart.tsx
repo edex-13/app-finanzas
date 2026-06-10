@@ -11,13 +11,17 @@ import {
 } from 'recharts'
 import { formatMoney, formatMoneyCompact } from '@/lib/format'
 
-interface DebtPoint {
+export interface DebtPoint {
   name: string
   amount: number
+  /** Origen de la deuda: deuda/crédito o tarjeta (para navegar al tocarla). */
+  kind?: 'debt' | 'card'
 }
 
 interface Props {
   data: DebtPoint[]
+  /** Tocar una barra (p. ej. para ir al detalle de esa deuda o tarjeta). */
+  onBarClick?: (point: DebtPoint) => void
 }
 
 // Pasteles variados del design system, rotados por índice.
@@ -30,7 +34,7 @@ const TONES = [
   'hsl(var(--pastel-olive))',
 ]
 
-export function DebtsBarChart({ data }: Props) {
+export function DebtsBarChart({ data, onBarClick }: Props) {
   return (
     <div className="h-[220px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -54,7 +58,13 @@ export function DebtsBarChart({ data }: Props) {
             cursor={{ fill: 'hsl(var(--muted))', radius: 16 }}
             content={(props) => <SoftTooltip {...props} />}
           />
-          <Bar dataKey="amount" radius={[16, 16, 16, 16]} maxBarSize={28}>
+          <Bar
+            dataKey="amount"
+            radius={[16, 16, 16, 16]}
+            maxBarSize={28}
+            onClick={(_, index) => onBarClick?.(data[index])}
+            cursor={onBarClick ? 'pointer' : undefined}
+          >
             {data.map((_, i) => (
               <Cell key={i} fill={TONES[i % TONES.length]} />
             ))}

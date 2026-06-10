@@ -172,6 +172,180 @@ export function calculateYearlyBenefits(
 }
 
 // ---------------------------------------------------------------------------
+// Prestaciones con HISTORIAL de sueldos (aumentos / cambios de salario)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un tramo del historial: desde start_date rige monthly_amount. El tramo
+ * termina donde empieza el siguiente (ordenado por fecha) o sigue vigente.
+ */
+export interface SalarySegment {
+  monthly_amount: number
+  start_date: string // ISO yyyy-MM-dd
+}
+
+function parseISO(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1)
+}
+
+function daysInclusive(from: Date, to: Date): number {
+  return Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1
+}
+
+/** Sueldo vigente en una fecha según el historial (0 si no hay tramo aún). */
+export function salaryOnDate(history: SalarySegment[], date: Date): number {
+  let amount = 0
+  for (const h of [...history].sort((a, b) =>
+    a.start_date < b.start_date ? -1 : 1,
+  )) {
+    if (parseISO(h.start_date) <= date) amount = Number(h.monthly_amount)
+    else break
+  }
+  return amount
+}
+
+/**
+ * Parte el rango [from, to] en tramos {salario, días} según el historial,
+ * recortado al periodo de empleo. Base de los cálculos prorrateados.
+ */
+export function salarySegmentsInRange(
+  history: SalarySegment[],
+  from: Date,
+  to: Date,
+  employment: { start: Date; end?: Date | null },
+): { amount: number; days: number }[] {
+  const sorted = [...history].sort((a, b) =>
+    a.start_date < b.start_date ? -1 : 1,
+  )
+  const rangeStart = employment.start > from ? employment.start : from
+  const rangeEnd = employment.end && employment.end < to ? employment.end : to
+  if (sorted.length === 0 || rangeEnd < rangeStart) return []
+
+  const out: { amount: number; days: number }[] = []
+  for (let i = 0; i < sorted.length; i += 1) {
+    const segStart = parseISO(sorted[i].start_date)
+    const segEnd =
+      i + 1 < sorted.length
+        ? new Date(parseISO(sorted[i + 1].start_date).getTime() - 86_400_000)
+        : rangeEnd
+    const s = segStart > rangeStart ? segStart : rangeStart
+    const e = segEnd < rangeEnd ? segEnd : rangeEnd
+    if (e < s) continue
+    out.push({ amount: Number(sorted[i].monthly_amount), days: daysInclusive(s, e) })
+  }
+  return out
+}
+
+/** Promedio mensual ponderado por días trabajados dentro del rango. */
+export function averageSalaryInRange(
+  history: SalarySegment[],
+  from: Date,
+  to: Date,
+  employment: { start: Date; end?: Date | null },
+): number {
+  const segs = salarySegmentsInRange(history, from, to, employment)
+  const days = segs.reduce((a, s) => a + s.days, 0)
+  if (days === 0) return 0
+  return round(segs.reduce((a, s) => a + s.amount * s.days, 0) / days)
+}
+
+/**
+ * Prima de un semestre con historial: Σ(salario_tramo × días_tramo)/360 sobre
+ * el semestre (ene–jun o jul–dic) recortado al empleo. Tope 180 días.
+ */
+export function calculatePrimaForSemester(
+  history: SalarySegment[],
+  year: number,
+  half: 1 | 2,
+  employment: { start: Date; end?: Date | null },
+): number {
+  const from = half === 1 ? new Date(year, 0, 1) : new Date(year, 6, 1)
+  const to = half === 1 ? new Date(year, 5, 30) : new Date(year, 11, 31)
+  const segs = salarySegmentsInRange(history, from, to, employment)
+  let total = 0
+  let days = 0
+  for (const s of segs) {
+    const d = Math.min(s.days, 180 - days)
+    if (d <= 0) break
+    total += (s.amount * d) / LABOR_YEAR_DAYS
+    days += d
+  }
+  return round(total)
+}
+
+/**
+ * Cesantías del año con historial (regla CO): si el salario cambió en los
+ * últimos 3 meses del periodo, la base es el PROMEDIO de lo devengado en el
+ * año; si no, el último salario. Capital = base × díasTrabajados / 360.
+ */
+export function calculateCesantiasFromHistory(
+  history: SalarySegment[],
+  year: number,
+  employment: { start: Date; end?: Date | null },
+): { base: number; days: number; cesantias: number; interest: number } {
+  const from = new Date(year, 0, 1)
+  const to =
+    employment.end && employment.end < new Date(year, 11, 31)
+      ? employment.end
+      : new Date(year, 11, 31)
+  const segs = salarySegmentsInRange(history, from, to, employment)
+  const days = Math.min(
+    LABOR_YEAR_DAYS,
+    segs.reduce((a, s) => a + s.days, 0),
+  )
+  if (days <= 0) return { base: 0, days: 0, cesantias: 0, interest: 0 }
+
+  const threeMonthsBefore = new Date(to.getFullYear(), to.getMonth() - 3, to.getDate())
+  const changedRecently = history.some((h) => {
+    const d = parseISO(h.start_date)
+    return d > threeMonthsBefore && d <= to
+  })
+  const base = changedRecently
+    ? averageSalaryInRange(history, from, to, employment)
+    : salaryOnDate(history, to)
+
+  const cesantias = round((base * days) / LABOR_YEAR_DAYS)
+  const interest = calculateCesantiasInterestCO(cesantias, days)
+  return { base: round(base), days, cesantias, interest }
+}
+
+export interface YearlyBenefitsDetailed {
+  /** Prima del primer semestre (se paga ~30 jun). */
+  primaJun: number
+  /** Prima del segundo semestre (se paga ~20 dic). */
+  primaDec: number
+  /** Cesantías del año (capital, va al fondo en feb del año siguiente). */
+  cesantias: number
+  /** Intereses de cesantías (a la cuenta, máx 31 ene del año siguiente). */
+  cesantiasInterest: number
+  /** Prima jun + prima dic + intereses: lo que entra a la cuenta. */
+  cashToAccount: number
+}
+
+/**
+ * Prestaciones del año calendario usando el historial de sueldos: cada tramo
+ * aporta proporcional a sus días. Es la versión con aumentos de
+ * calculateYearlyBenefits.
+ */
+export function calculateYearlyBenefitsFromHistory(
+  history: SalarySegment[],
+  year: number,
+  employment: { start: Date; end?: Date | null },
+): YearlyBenefitsDetailed {
+  const primaJun = calculatePrimaForSemester(history, year, 1, employment)
+  const primaDec = calculatePrimaForSemester(history, year, 2, employment)
+  const ces = calculateCesantiasFromHistory(history, year, employment)
+  return {
+    primaJun,
+    primaDec,
+    cesantias: ces.cesantias,
+    cesantiasInterest: ces.interest,
+    cashToAccount: round(primaJun + primaDec + ces.interest),
+  }
+}
+
+// ---------------------------------------------------------------------------
 function round(v: number): number {
   return Math.round(v * 100) / 100
 }

@@ -69,6 +69,7 @@ export function IncomeForm({
   onCancel,
   submitLabel = 'Guardar',
 }: Props) {
+  const isEditing = !!initial
   const form = useForm<IncomeSourceInput>({
     resolver: zodResolver(incomeSourceSchema),
     defaultValues: {
@@ -88,8 +89,9 @@ export function IncomeForm({
   const includesBenefits = form.watch('includes_legal_benefits')
   const startDate = form.watch('start_date')
 
-  // Preview en vivo del desglose neto + prestaciones (solo cuando aplica).
-  const showBenefitsPreview = includesBenefits && monthly > 0
+  // Preview en vivo del desglose neto + prestaciones, solo al CREAR (al
+  // editar, el sueldo y sus cálculos viven en el historial "Mis sueldos").
+  const showBenefitsPreview = !isEditing && includesBenefits && monthly > 0
   const breakdown = showBenefitsPreview ? calculateNetSalary(monthly) : null
   const yearly = showBenefitsPreview
     ? calculateYearlyBenefits(monthly, daysWorkedInYear(startDate))
@@ -113,19 +115,22 @@ export function IncomeForm({
         <Input id="name" {...form.register('name')} className={pillInput} />
       </FormField>
 
-      <div className="grid gap-5 sm:grid-cols-2">
-        <FormField
-          label="Salario mensual"
-          error={form.formState.errors.monthly_amount?.message}
-        >
-          <MoneyInput
-            value={form.watch('monthly_amount')}
-            onChange={(v) =>
-              form.setValue('monthly_amount', v, { shouldValidate: true })
-            }
-            className={pillInput}
-          />
-        </FormField>
+      <div className={isEditing ? 'space-y-5' : 'grid gap-5 sm:grid-cols-2'}>
+        {!isEditing && (
+          <FormField
+            label="Sueldo mensual actual"
+            error={form.formState.errors.monthly_amount?.message}
+            hint="Los aumentos los registras después en «Mis sueldos»."
+          >
+            <MoneyInput
+              value={form.watch('monthly_amount')}
+              onChange={(v) =>
+                form.setValue('monthly_amount', v, { shouldValidate: true })
+              }
+              className={pillInput}
+            />
+          </FormField>
+        )}
         <FormField label="Tipo de pago">
           <Select
             value={paymentType}
@@ -143,6 +148,14 @@ export function IncomeForm({
           </Select>
         </FormField>
       </div>
+
+      {isEditing && (
+        <p className="rounded-2xl bg-secondary p-4 text-xs text-muted-foreground">
+          💼 El sueldo se cambia desde el historial{' '}
+          <span className="font-bold text-foreground">«Mis sueldos»</span> en la
+          página de ingresos, registrando un aumento con su fecha.
+        </p>
+      )}
 
       {paymentType === 'biweekly' && monthly > 0 && (
         <p className="rounded-2xl bg-secondary p-4 text-xs text-muted-foreground">

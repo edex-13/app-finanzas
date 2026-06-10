@@ -3,14 +3,22 @@ import { addMonths, endOfMonth, startOfMonth } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { qk } from '@/lib/query-keys'
 import { useAuth } from '@/features/auth/AuthProvider'
-import type { IncomeSourceRow, SalaryPeriodRow } from '@/types/database'
-import type { IncomeSourceInput } from '@/lib/validations'
+import type {
+  IncomeSourceRow,
+  SalaryHistoryRow,
+  SalaryPeriodRow,
+} from '@/types/database'
+import type {
+  IncomeSourceInput,
+  SalaryHistoryEntryInput,
+} from '@/lib/validations'
 import { calculateBiweeklySalary } from '@/lib/financial-calculations'
 import {
   calculateNetSalary,
-  calculatePrimaCO,
-  calculateCesantias,
-  calculateCesantiasInterestCO,
+  calculatePrimaForSemester,
+  calculateCesantiasFromHistory,
+  salaryOnDate,
+  type SalarySegment,
 } from '@/lib/labor-co'
 import { fromISODate, today, toISODate } from '@/lib/date-utils'
 
@@ -27,6 +35,24 @@ export function useIncomeSources() {
         .order('created_at', { ascending: true })
       if (error) throw error
       return (data ?? []) as IncomeSourceRow[]
+    },
+  })
+}
+
+/** Historial de sueldos de TODAS las fuentes del usuario, por fecha. */
+export function useSalaryHistory() {
+  const { user } = useAuth()
+  return useQuery({
+    queryKey: user ? qk.salaryHistory(user.id) : ['salary_history', 'anon'],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('salary_history')
+        .select('*')
+        .eq('user_id', user!.id)
+        .order('start_date', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as SalaryHistoryRow[]
     },
   })
 }
@@ -50,19 +76,37 @@ export function useSalaryPeriods() {
 
 type NewPeriod = Omit<SalaryPeriodRow, 'id' | 'created_at' | 'updated_at'>
 
-function generateSalaryPeriods(income: IncomeSourceRow): NewPeriod[] {
+/**
+ * Genera los periodos salariales futuros (6 meses) + prestaciones de ley a
+ * partir del HISTORIAL de sueldos. Cada periodo usa el sueldo vigente en su
+ * fecha (si registraste un aumento futuro, los meses posteriores ya lo usan).
+ * Pura: exportada para tests.
+ */
+export function generateSalaryPeriods(
+  income: IncomeSourceRow,
+  history: SalarySegment[],
+): NewPeriod[] {
   const out: NewPeriod[] = []
   const start = today()
+  const employment = {
+    start: fromISODate(income.start_date),
+    end: income.end_date ? fromISODate(income.end_date) : null,
+  }
+  const segments: SalarySegment[] =
+    history.length > 0
+      ? history
+      : [{ monthly_amount: income.monthly_amount, start_date: income.start_date }]
 
-  // Salario que llega a la cuenta = NETO (tras salud + pensión + FSP).
-  // Si la fuente NO es salario con prestaciones de ley, se asume monto tal cual.
-  const monthlyNet = income.includes_legal_benefits
-    ? calculateNetSalary(income.monthly_amount).net
-    : income.monthly_amount
-
+  // --- Sueldos mensuales/quincenales: NETO del sueldo vigente en cada mes ---
   for (let i = 0; i < 6; i += 1) {
     const monthStart = startOfMonth(addMonths(start, i))
     const monthEnd = endOfMonth(monthStart)
+    if (employment.end && monthStart > employment.end) break
+    const gross = salaryOnDate(segments, monthEnd)
+    if (gross <= 0) continue
+    const monthlyNet = income.includes_legal_benefits
+      ? calculateNetSalary(gross).net
+      : gross
     if (income.payment_type === 'biweekly') {
       const mid = new Date(monthStart.getFullYear(), monthStart.getMonth(), 15)
       out.push({
@@ -98,68 +142,118 @@ function generateSalaryPeriods(income: IncomeSourceRow): NewPeriod[] {
     }
   }
 
-  // Prestaciones de ley (Colombia). Las cantidades usan el salario BRUTO.
+  // --- Prestaciones de ley (Colombia), calculadas con el historial ---
   if (income.includes_legal_benefits) {
-    const year = start.getFullYear()
-    const startDate = fromISODate(income.start_date)
+    const horizon = addMonths(start, 12)
 
-    // Prima: junio (1er semestre) y diciembre (2º semestre), medio salario c/u.
-    const jun30 = new Date(year, 5, 30)
-    const dec20 = new Date(year, 11, 20)
-    for (const primaDate of [jun30, dec20]) {
-      if (primaDate < start) continue
-      out.push({
-        user_id: income.user_id,
-        income_source_id: income.id,
-        period_start: toISODate(primaDate),
-        period_end: toISODate(primaDate),
-        expected_amount: calculatePrimaCO(income.monthly_amount, 180),
-        actual_amount: null,
-        type: 'prima',
-      })
+    // Primas de este año y el siguiente que caigan dentro del horizonte.
+    for (const year of [start.getFullYear(), start.getFullYear() + 1]) {
+      const dates: { date: Date; half: 1 | 2 }[] = [
+        { date: new Date(year, 5, 30), half: 1 },
+        { date: new Date(year, 11, 20), half: 2 },
+      ]
+      for (const { date, half } of dates) {
+        if (date < start || date > horizon) continue
+        const amount = calculatePrimaForSemester(segments, year, half, employment)
+        if (amount <= 0) continue
+        out.push({
+          user_id: income.user_id,
+          income_source_id: income.id,
+          period_start: toISODate(date),
+          period_end: toISODate(date),
+          expected_amount: amount,
+          actual_amount: null,
+          type: 'prima',
+        })
+      }
     }
 
-    // Días trabajados en el año hasta el cierre (31 dic), tope 360.
-    const yearEnd = new Date(year, 11, 31)
-    const daysWorked = Math.min(
-      360,
-      Math.max(
-        0,
-        Math.floor((yearEnd.getTime() - startDate.getTime()) / 86_400_000) + 1,
-      ),
-    )
-    const cesantias = calculateCesantias(income.monthly_amount, daysWorked)
-
-    // Cesantías (capital): se consignan al fondo a mediados de febrero del año
-    // siguiente. INFORMATIVAS — la proyección NO las suma al saldo de la cuenta.
+    // Cesantías del año en curso: capital al fondo (feb año sig., informativo)
+    // e intereses a la cuenta (máx 31 ene año sig.).
+    const year = start.getFullYear()
+    const ces = calculateCesantiasFromHistory(segments, year, employment)
     const feb14 = new Date(year + 1, 1, 14)
-    if (feb14 > start && cesantias > 0) {
+    if (feb14 > start && ces.cesantias > 0) {
       out.push({
         user_id: income.user_id,
         income_source_id: income.id,
         period_start: toISODate(feb14),
         period_end: toISODate(feb14),
-        expected_amount: cesantias,
+        expected_amount: ces.cesantias,
         actual_amount: null,
         type: 'cesantias',
       })
     }
-
-    // Intereses sobre cesantías: SÍ van a la cuenta, máximo 31 de enero.
     const nextJan = new Date(year + 1, 0, 31)
-    if (nextJan > start && cesantias > 0) {
+    if (nextJan > start && ces.interest > 0) {
       out.push({
         user_id: income.user_id,
         income_source_id: income.id,
         period_start: toISODate(nextJan),
         period_end: toISODate(nextJan),
-        expected_amount: calculateCesantiasInterestCO(cesantias, daysWorked),
+        expected_amount: ces.interest,
         actual_amount: null,
         type: 'cesantias_interest',
       })
     }
   }
   return out
+}
+
+/**
+ * Borra los periodos futuros proyectados (actual_amount null) de la fuente y
+ * los regenera desde el historial. Se llama tras cualquier cambio de sueldos.
+ */
+async function regenerateSalaryPeriods(
+  income: IncomeSourceRow,
+  history: SalarySegment[],
+) {
+  const { error: delErr } = await supabase
+    .from('salary_periods')
+    .delete()
+    .eq('income_source_id', income.id)
+    .is('actual_amount', null)
+  if (delErr) throw delErr
+  const periods = generateSalaryPeriods(income, history)
+  if (periods.length > 0) {
+    const { error } = await supabase.from('salary_periods').insert(periods)
+    if (error) throw error
+  }
+}
+
+async function fetchHistoryFor(
+  incomeSourceId: string,
+): Promise<SalaryHistoryRow[]> {
+  const { data, error } = await supabase
+    .from('salary_history')
+    .select('*')
+    .eq('income_source_id', incomeSourceId)
+    .order('start_date', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as SalaryHistoryRow[]
+}
+
+/** Sincroniza income_sources.monthly_amount = sueldo vigente del historial. */
+async function syncCurrentSalary(
+  incomeSourceId: string,
+  history: SalaryHistoryRow[],
+): Promise<number> {
+  const current = salaryOnDate(history, today())
+  const { error } = await supabase
+    .from('income_sources')
+    .update({ monthly_amount: current })
+    .eq('id', incomeSourceId)
+  if (error) throw error
+  return current
+}
+
+function invalidateIncome(
+  qc: ReturnType<typeof useQueryClient>,
+  userId: string,
+) {
+  qc.invalidateQueries({ queryKey: qk.income(userId) })
+  qc.invalidateQueries({ queryKey: qk.salaryHistory(userId) })
+  qc.invalidateQueries({ queryKey: qk.salaryPeriods(userId) })
 }
 
 export function useCreateIncomeSource() {
@@ -174,19 +268,25 @@ export function useCreateIncomeSource() {
         .single()
       if (error) throw error
       const created = data as IncomeSourceRow
-      const periods = generateSalaryPeriods(created)
-      if (periods.length > 0) {
-        const { error: pe } = await supabase
-          .from('salary_periods')
-          .insert(periods)
-        if (pe) throw pe
-      }
+
+      // El sueldo inicial es el primer tramo del historial.
+      const { error: he } = await supabase.from('salary_history').insert({
+        user_id: user!.id,
+        income_source_id: created.id,
+        monthly_amount: created.monthly_amount,
+        start_date: created.start_date,
+      })
+      if (he) throw he
+
+      await regenerateSalaryPeriods(created, [
+        {
+          monthly_amount: created.monthly_amount,
+          start_date: created.start_date,
+        },
+      ])
       return created
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.income(user!.id) })
-      qc.invalidateQueries({ queryKey: qk.salaryPeriods(user!.id) })
-    },
+    onSuccess: () => invalidateIncome(qc, user!.id),
   })
 }
 
@@ -201,13 +301,18 @@ export function useUpdateIncomeSource() {
       id: string
       input: IncomeSourceInput
     }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('income_sources')
         .update(input)
         .eq('id', id)
+        .select()
+        .single()
       if (error) throw error
+      const updated = data as IncomeSourceRow
+      const history = await fetchHistoryFor(id)
+      await regenerateSalaryPeriods(updated, history)
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.income(user!.id) }),
+    onSuccess: () => invalidateIncome(qc, user!.id),
   })
 }
 
@@ -222,9 +327,96 @@ export function useDeleteIncomeSource() {
         .eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.income(user!.id) })
-      qc.invalidateQueries({ queryKey: qk.salaryPeriods(user!.id) })
+    onSuccess: () => invalidateIncome(qc, user!.id),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Historial de sueldos: "desde esta fecha gano X". Cada mutación sincroniza el
+// sueldo vigente de la fuente y regenera los periodos proyectados.
+// ---------------------------------------------------------------------------
+
+async function resyncAfterHistoryChange(incomeSourceId: string) {
+  const history = await fetchHistoryFor(incomeSourceId)
+  await syncCurrentSalary(incomeSourceId, history)
+  const { data, error } = await supabase
+    .from('income_sources')
+    .select('*')
+    .eq('id', incomeSourceId)
+    .single()
+  if (error) throw error
+  await regenerateSalaryPeriods(data as IncomeSourceRow, history)
+}
+
+export function useAddSalaryEntry() {
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      incomeSourceId,
+      input,
+    }: {
+      incomeSourceId: string
+      input: SalaryHistoryEntryInput
+    }) => {
+      const { error } = await supabase.from('salary_history').insert({
+        user_id: user!.id,
+        income_source_id: incomeSourceId,
+        monthly_amount: input.monthly_amount,
+        start_date: input.start_date,
+      })
+      if (error) throw error
+      await resyncAfterHistoryChange(incomeSourceId)
     },
+    onSuccess: () => invalidateIncome(qc, user!.id),
+  })
+}
+
+export function useUpdateSalaryEntry() {
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      incomeSourceId,
+      input,
+    }: {
+      id: string
+      incomeSourceId: string
+      input: SalaryHistoryEntryInput
+    }) => {
+      const { error } = await supabase
+        .from('salary_history')
+        .update({
+          monthly_amount: input.monthly_amount,
+          start_date: input.start_date,
+        })
+        .eq('id', id)
+      if (error) throw error
+      await resyncAfterHistoryChange(incomeSourceId)
+    },
+    onSuccess: () => invalidateIncome(qc, user!.id),
+  })
+}
+
+export function useDeleteSalaryEntry() {
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      incomeSourceId,
+    }: {
+      id: string
+      incomeSourceId: string
+    }) => {
+      const { error } = await supabase
+        .from('salary_history')
+        .delete()
+        .eq('id', id)
+      if (error) throw error
+      await resyncAfterHistoryChange(incomeSourceId)
+    },
+    onSuccess: () => invalidateIncome(qc, user!.id),
   })
 }

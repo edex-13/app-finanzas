@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -69,6 +69,7 @@ const healthTone: Record<FinancialHealth['label'], string> = {
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const snap = useFinancialSnapshot()
   const projection = useProjection({ horizonDays: 90 })
   const accounts = useAccounts()
@@ -175,21 +176,33 @@ export function DashboardPage() {
 
   const upcomingIncomeTotal = upcomingIncome.reduce((a, i) => a + i.amount, 0)
 
-  // Deuda por origen (alimenta DebtsBarChart).
+  // Deuda por origen (alimenta DebtsBarChart). El kind permite navegar al
+  // tocar la barra: deudas → /debts, tarjetas → wallet con tab de tarjetas.
   const debtsByOrigin = useMemo(() => {
-    const out: { name: string; amount: number }[] = []
+    const out: { name: string; amount: number; kind: 'debt' | 'card' }[] = []
     for (const d of debts.data ?? []) {
       if (!d.archived && d.remaining_balance > 0)
-        out.push({ name: d.name, amount: Number(d.remaining_balance) })
+        out.push({ name: d.name, amount: Number(d.remaining_balance), kind: 'debt' })
     }
     for (const c of cards.data ?? []) {
       if (!c.archived && c.current_debt > 0)
-        out.push({ name: c.name, amount: Number(c.current_debt) })
+        out.push({ name: c.name, amount: Number(c.current_debt), kind: 'card' })
     }
     return out.sort((a, b) => b.amount - a.amount).slice(0, 5)
   }, [debts.data, cards.data])
 
   const greeting = useMemo(() => getGreeting(), [])
+
+  // Las gráficas filtran al tocar: navegan a /transactions con los filtros
+  // del mes actual ya aplicados en la URL.
+  const goToTransactions = (params: Record<string, string>) => {
+    const qs = new URLSearchParams({
+      from: monthRange.from,
+      to: monthRange.to,
+      ...params,
+    })
+    navigate(`${paths.transactions}?${qs.toString()}`)
+  }
 
   return (
     <div className="space-y-8">
@@ -249,7 +262,13 @@ export function DashboardPage() {
             </span>
           </div>
           <div className="rounded-3xl bg-card p-4">
-            <IncomeExpenseChart income={flow.income} expense={flow.expense} />
+            <IncomeExpenseChart
+              income={flow.income}
+              expense={flow.expense}
+              onBarClick={(which) =>
+                goToTransactions({ flow: which === 'income' ? 'in' : 'out' })
+              }
+            />
             <div className="mt-2 flex items-center justify-between px-1">
               <span className="text-sm font-bold text-muted-foreground">Neto del mes</span>
               <MoneyDisplay
@@ -271,15 +290,27 @@ export function DashboardPage() {
           <h2 className="text-xl font-extrabold tracking-tight">¿En qué gastas?</h2>
           <div className="grid gap-4 sm:grid-cols-2 sm:items-center">
             <div className="rounded-3xl bg-card p-4">
-              <CategorySpendChart data={spendByCategory} total={totalSpend} />
+              <CategorySpendChart
+                data={spendByCategory}
+                total={totalSpend}
+                onSliceClick={(c) =>
+                  c.categoryId &&
+                  goToTransactions({ flow: 'out', categoryId: c.categoryId })
+                }
+              />
             </div>
             <div className="space-y-2">
               {spendByCategory.slice(0, 5).map((c) => {
                 const Icon = categoryIcon(c.icon)
                 return (
-                  <div
+                  <button
                     key={c.categoryId ?? 'none'}
-                    className="flex items-center gap-3 rounded-2xl bg-card px-4 py-3"
+                    type="button"
+                    onClick={() =>
+                      c.categoryId &&
+                      goToTransactions({ flow: 'out', categoryId: c.categoryId })
+                    }
+                    className="flex w-full items-center gap-3 rounded-2xl bg-card px-4 py-3 text-left transition-transform active:scale-[0.98]"
                   >
                     <span
                       className="grid h-10 w-10 shrink-0 place-items-center rounded-full"
@@ -297,7 +328,8 @@ export function DashboardPage() {
                       value={c.amount}
                       className="tnum shrink-0 text-sm font-extrabold"
                     />
-                  </div>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
                 )
               })}
             </div>
@@ -308,7 +340,12 @@ export function DashboardPage() {
       {/* KPIs como píldoras */}
       <MotionList className="grid grid-cols-3 gap-2.5">
         <MotionItem>
-          <Stat label="Disponible" value={snap.data.totalAvailable} loading={snap.isLoading} />
+          <Stat
+            label="Disponible"
+            value={snap.data.totalAvailable}
+            loading={snap.isLoading}
+            to={paths.wallet}
+          />
         </MotionItem>
         <MotionItem>
           <Stat
@@ -316,6 +353,7 @@ export function DashboardPage() {
             value={snap.data.totalDebt}
             loading={snap.isLoading}
             tone={snap.data.totalDebt > 0 ? 'destructive' : undefined}
+            to={paths.debts}
           />
         </MotionItem>
         <MotionItem>
@@ -324,13 +362,22 @@ export function DashboardPage() {
             value={snap.data.totalCreditAvailable}
             loading={snap.isLoading}
             tone="success"
+            to={`${paths.wallet}?tab=cards`}
           />
         </MotionItem>
       </MotionList>
 
       {/* Saldo proyectado: gráfica de línea + tres cifras grandes */}
       <section className="space-y-4">
-        <h2 className="text-xl font-extrabold tracking-tight">Saldo proyectado</h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xl font-extrabold tracking-tight">Saldo proyectado</h2>
+          <Link
+            to={paths.projections}
+            className="text-xs font-bold text-muted-foreground active:scale-[0.97]"
+          >
+            Ver detalle →
+          </Link>
+        </div>
         <div className="rounded-3xl bg-card p-4">
           {projection.isLoading ? (
             <Skeleton className="h-[260px] w-full rounded-2xl" />
@@ -354,7 +401,12 @@ export function DashboardPage() {
         <section className="space-y-4">
           <h2 className="text-xl font-extrabold tracking-tight">Deuda por origen</h2>
           <div className="rounded-3xl bg-card p-4">
-            <DebtsBarChart data={debtsByOrigin} />
+            <DebtsBarChart
+              data={debtsByOrigin}
+              onBarClick={(p) =>
+                navigate(p.kind === 'card' ? `${paths.wallet}?tab=cards` : paths.debts)
+              }
+            />
           </div>
         </section>
       )}
@@ -555,14 +607,17 @@ function Stat({
   value,
   loading,
   tone,
+  to,
 }: {
   label: string
   value: number
   loading?: boolean
   tone?: 'destructive' | 'success'
+  /** Si se indica, la píldora navega a esa ruta al tocarla. */
+  to?: string
 }) {
-  return (
-    <div className="rounded-3xl bg-card px-4 py-3">
+  const body = (
+    <>
       <p className="text-[11px] font-semibold text-muted-foreground">{label}</p>
       {loading ? (
         <Skeleton className="mt-1 h-6 w-16" />
@@ -577,8 +632,19 @@ function Stat({
           {formatMoneyCompact(value)}
         </span>
       )}
-    </div>
+    </>
   )
+  if (to) {
+    return (
+      <Link
+        to={to}
+        className="block rounded-3xl bg-card px-4 py-3 transition-transform active:scale-[0.97]"
+      >
+        {body}
+      </Link>
+    )
+  }
+  return <div className="rounded-3xl bg-card px-4 py-3">{body}</div>
 }
 
 /* ── Fila de evento (píldora) ───────────────────────────────── */

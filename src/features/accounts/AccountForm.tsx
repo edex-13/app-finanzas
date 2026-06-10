@@ -92,24 +92,44 @@ export function AccountForm({
         </p>
       </div>
 
-      {/* Saldo: número protagonista, sin caja. */}
-      <div>
-        <p className="mb-1 text-xs font-semibold text-muted-foreground">
-          Saldo actual
-        </p>
-        <MoneyInput
-          value={form.watch('balance')}
-          onChange={(v) =>
-            form.setValue('balance', v, { shouldValidate: true })
-          }
-          className="h-auto rounded-none border-0 bg-transparent px-0 text-4xl font-extrabold tnum placeholder:text-muted-foreground/40 focus-visible:ring-0"
-        />
-        {form.formState.errors.balance?.message && (
-          <p className="text-xs text-destructive">
-            {form.formState.errors.balance.message}
+      {/* Saldo: número protagonista, sin caja. Solo se fija AL CREAR; después
+          se mueve únicamente con los movimientos (o un Ajuste). */}
+      {!initial ? (
+        <div>
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">
+            Saldo inicial
           </p>
-        )}
-      </div>
+          <MoneyInput
+            value={form.watch('balance')}
+            onChange={(v) =>
+              form.setValue('balance', v, { shouldValidate: true })
+            }
+            className="h-auto rounded-none border-0 bg-transparent px-0 text-4xl font-extrabold tnum placeholder:text-muted-foreground/40 focus-visible:ring-0"
+          />
+          {form.formState.errors.balance?.message && (
+            <p className="text-xs text-destructive">
+              {form.formState.errors.balance.message}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div>
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">
+            Saldo actual
+          </p>
+          <p className="text-4xl font-extrabold tnum">
+            {new Intl.NumberFormat('es-CO', {
+              style: 'currency',
+              currency: 'COP',
+              maximumFractionDigits: 0,
+            }).format(Number(initial.balance))}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Se mueve con tus transacciones. Para corregirlo, registra un
+            movimiento de tipo «Ajuste».
+          </p>
+        </div>
+      )}
 
       <FormField
         label="Nombre"

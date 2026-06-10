@@ -532,14 +532,23 @@ export function TransactionForm({
         </div>
       )}
 
-      {/* Deuda (solo pago de deuda) */}
+      {/* Deuda (solo pago de deuda). Al elegirla, prellena el monto con el
+          valor de la cuota: si coinciden, el pago marca la cuota como pagada. */}
       {kind === 'debt_payment' && debts.length > 0 && (
         <FormField label="Deuda">
           <PillChoice
             options={debts.map((d) => ({ id: d.id, name: d.name }))}
             value={form.watch('debt_id')}
             allowClear
-            onChange={(v) => form.setValue('debt_id', v)}
+            onChange={(v) => {
+              form.setValue('debt_id', v)
+              const debt = debts.find((d) => d.id === v)
+              if (debt && !form.getValues('amount')) {
+                form.setValue('amount', Number(debt.approx_installment_amount), {
+                  shouldValidate: true,
+                })
+              }
+            }}
           />
         </FormField>
       )}

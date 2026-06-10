@@ -22,6 +22,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { PageTransition } from '@/components/layout/PageTransition'
+import { InstallPrompt } from '@/components/common/InstallPrompt'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { paths } from '@/routes/paths'
 import { cn } from '@/lib/utils'
@@ -132,6 +133,9 @@ export function AppShell() {
             </PageTransition>
           </div>
         </main>
+
+        {/* Invitación a instalar la PWA (se oculta si ya está instalada). */}
+        <InstallPrompt />
 
         {/* Bottom nav (móvil) */}
         <nav className="safe-pb fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/90 backdrop-blur-lg md:hidden">

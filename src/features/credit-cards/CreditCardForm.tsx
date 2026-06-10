@@ -41,7 +41,7 @@ export function CreditCardForm({
       name: initial?.name ?? '',
       bank: initial?.bank ?? '',
       credit_limit: Number(initial?.credit_limit ?? 0),
-      current_debt: Number(initial?.current_debt ?? 0),
+      opening_balance: Number(initial?.opening_balance ?? 0),
       statement_day: initial?.statement_day ?? 15,
       payment_due_day: initial?.payment_due_day ?? 5,
       color: initial?.color ?? '',
@@ -118,19 +118,39 @@ export function CreditCardForm({
             className={pillInput}
           />
         </FormField>
-        <FormField
-          label="Deuda actual"
-          error={form.formState.errors.current_debt?.message}
-        >
-          <MoneyInput
-            value={form.watch('current_debt')}
-            onChange={(v) =>
-              form.setValue('current_debt', v, { shouldValidate: true })
-            }
-            className={pillInput}
-          />
-        </FormField>
+        {/* El saldo de apertura solo se fija AL CREAR; después la deuda es
+            100% derivada de los movimientos. */}
+        {!initial ? (
+          <FormField
+            label="Saldo de apertura"
+            error={form.formState.errors.opening_balance?.message}
+          >
+            <MoneyInput
+              value={form.watch('opening_balance')}
+              onChange={(v) =>
+                form.setValue('opening_balance', v, { shouldValidate: true })
+              }
+              className={pillInput}
+            />
+          </FormField>
+        ) : (
+          <FormField label="Deuda actual">
+            <p className="flex h-12 items-center rounded-2xl bg-secondary px-4 text-base font-bold tnum text-muted-foreground">
+              {new Intl.NumberFormat('es-CO', {
+                style: 'currency',
+                currency: 'COP',
+                maximumFractionDigits: 0,
+              }).format(Number(initial.current_debt))}
+            </p>
+          </FormField>
+        )}
       </div>
+
+      <p className="-mt-2 text-xs text-muted-foreground">
+        {initial
+          ? 'La deuda se calcula automáticamente con tus gastos, cuotas y pagos — no se edita a mano.'
+          : 'El saldo de apertura es lo que ya debes hoy. De ahí en adelante la deuda se calcula sola con los movimientos.'}
+      </p>
 
       <div className="grid gap-5 sm:grid-cols-2">
         <FormField

@@ -381,6 +381,40 @@ export function recalculateDebtProgress(
   }
 }
 
+/**
+ * Saldo pendiente de una deuda derivado de sus cuotas: suma de las que no están
+ * pagadas. Es la fuente de verdad del saldo cuando la deuda tiene cuotas.
+ */
+export function debtRemainingFromInstallments(
+  installments: Pick<DebtInstallmentRow, 'amount' | 'status'>[],
+): number {
+  return round(
+    installments
+      .filter((i) => i.status !== 'paid' && i.status !== 'cancelled')
+      .reduce((a, i) => a + Number(i.amount), 0),
+  )
+}
+
+/**
+ * Saldo derivado de una tarjeta de crédito: lo mismo que calcula la BD en
+ * recompute_card_debt. Útil para UI optimista y tests.
+ *   current_debt = opening_balance + Σ cargos − Σ pagos  (nunca negativo)
+ */
+export function computeCardDebt(params: {
+  openingBalance: number
+  charges: number
+  payments: number
+}): number {
+  return round(
+    Math.max(
+      0,
+      Number(params.openingBalance) +
+        Number(params.charges) -
+        Number(params.payments),
+    ),
+  )
+}
+
 // =====================================================================
 // Proyección financiera
 // =====================================================================

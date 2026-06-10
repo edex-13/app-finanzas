@@ -9,6 +9,11 @@ import {
   calculateCesantiasInterestCO,
   calculatePrimaCO,
   calculateYearlyBenefits,
+  salaryOnDate,
+  averageSalaryInRange,
+  calculatePrimaForSemester,
+  calculateCesantiasFromHistory,
+  calculateYearlyBenefitsFromHistory,
 } from '../labor-co'
 
 describe('deducciones de ley', () => {
@@ -64,6 +69,73 @@ describe('prestaciones sociales', () => {
 
   it('topea días trabajados a 360', () => {
     expect(calculateYearlyBenefits(1_000_000, 500).cesantias).toBe(1_000_000)
+  })
+})
+
+describe('prestaciones con historial de sueldos (aumentos)', () => {
+  // Trabajó todo 2026: ene–jun ganó 2M, desde 1 jul ganó 3M.
+  const history = [
+    { monthly_amount: 2_000_000, start_date: '2026-01-01' },
+    { monthly_amount: 3_000_000, start_date: '2026-07-01' },
+  ]
+  const employment = { start: new Date(2026, 0, 1) }
+
+  it('salaryOnDate devuelve el sueldo vigente en cada fecha', () => {
+    expect(salaryOnDate(history, new Date(2026, 2, 15))).toBe(2_000_000)
+    expect(salaryOnDate(history, new Date(2026, 8, 1))).toBe(3_000_000)
+    expect(salaryOnDate(history, new Date(2025, 11, 31))).toBe(0)
+  })
+
+  it('prima de cada semestre usa el sueldo de ese semestre', () => {
+    // 1er semestre completo con 2M → media prima de 2M = 1M
+    expect(calculatePrimaForSemester(history, 2026, 1, employment)).toBe(1_000_000)
+    // 2º semestre completo con 3M → media prima de 3M = 1.5M
+    expect(calculatePrimaForSemester(history, 2026, 2, employment)).toBe(1_500_000)
+  })
+
+  it('prima prorratea si entró a mitad de semestre', () => {
+    // Entró el 1 de abril: solo abr-may-jun del 1er semestre (91 días calendario)
+    const late = { start: new Date(2026, 3, 1) }
+    const prima = calculatePrimaForSemester(history, 2026, 1, late)
+    expect(prima).toBeGreaterThan(0)
+    expect(prima).toBeLessThan(1_000_000)
+  })
+
+  it('cesantías: si el sueldo cambió en los últimos 3 meses usa el promedio', () => {
+    // Cambio el 1 nov (dentro de los últimos 3 meses del año) → promedio
+    const lateRaise = [
+      { monthly_amount: 2_000_000, start_date: '2026-01-01' },
+      { monthly_amount: 3_000_000, start_date: '2026-11-01' },
+    ]
+    const r = calculateCesantiasFromHistory(lateRaise, 2026, employment)
+    expect(r.base).toBeGreaterThan(2_000_000)
+    expect(r.base).toBeLessThan(3_000_000)
+    expect(r.base).toBe(
+      averageSalaryInRange(
+        lateRaise,
+        new Date(2026, 0, 1),
+        new Date(2026, 11, 31),
+        employment,
+      ),
+    )
+  })
+
+  it('cesantías: si el sueldo está estable usa el último salario', () => {
+    // Cambio el 1 jul (hace más de 3 meses al 31 dic) → último salario 3M
+    const r = calculateCesantiasFromHistory(history, 2026, employment)
+    expect(r.base).toBe(3_000_000)
+    expect(r.days).toBe(360)
+    expect(r.cesantias).toBe(3_000_000)
+    expect(r.interest).toBe(360_000) // 12%
+  })
+
+  it('calculateYearlyBenefitsFromHistory arma el año completo', () => {
+    const y = calculateYearlyBenefitsFromHistory(history, 2026, employment)
+    expect(y.primaJun).toBe(1_000_000)
+    expect(y.primaDec).toBe(1_500_000)
+    expect(y.cesantias).toBe(3_000_000)
+    expect(y.cesantiasInterest).toBe(360_000)
+    expect(y.cashToAccount).toBe(1_000_000 + 1_500_000 + 360_000)
   })
 })
 

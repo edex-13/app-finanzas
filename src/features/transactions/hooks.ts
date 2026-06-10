@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { qk } from '@/lib/query-keys'
@@ -111,14 +112,81 @@ export function useTransactions(filters: TransactionFilters = {}) {
   })
 }
 
-/** Estado de filtros para la página de transacciones. */
+/** Claves de filtro que viven en la URL (?flow=out&categoryId=…). */
+const URL_FILTER_KEYS = [
+  'from',
+  'to',
+  'flow',
+  'categoryId',
+  'accountId',
+  'cardId',
+  'search',
+] as const
+
+/**
+ * Filtros de la página de transacciones SINCRONIZADOS con la URL: otras
+ * páginas (dashboard) pueden enlazar a /transactions?flow=out&categoryId=X
+ * y la vista llega ya filtrada. Navegar atrás restaura los filtros previos.
+ */
 export function useTransactionFilters(initial: TransactionFilters = {}) {
-  const [filters, setFilters] = useState<TransactionFilters>(initial)
-  const setFilter = <K extends keyof TransactionFilters>(
-    key: K,
-    value: TransactionFilters[K],
-  ) => setFilters((f) => ({ ...f, [key]: value || undefined }))
-  const reset = () => setFilters({})
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const filters = useMemo<TransactionFilters>(() => {
+    const f: TransactionFilters = { ...initial }
+    for (const key of URL_FILTER_KEYS) {
+      const v = searchParams.get(key)
+      if (!v) continue
+      if (key === 'flow') {
+        if (v === 'in' || v === 'out') f.flow = v
+      } else {
+        f[key] = v
+      }
+    }
+    return f
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  const setFilter = useCallback(
+    <K extends keyof TransactionFilters>(
+      key: K,
+      value: TransactionFilters[K],
+    ) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (value) next.set(key, String(value))
+          else next.delete(key)
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const setFilters = useCallback(
+    (f: TransactionFilters) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          for (const key of URL_FILTER_KEYS) {
+            const v = f[key]
+            if (v) next.set(key, String(v))
+            else next.delete(key)
+          }
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const reset = useCallback(
+    () => setFilters({}),
+    [setFilters],
+  )
+
   return { filters, setFilter, setFilters, reset }
 }
 
@@ -154,12 +222,47 @@ async function callCreateTransactionRpc(
   return data as string
 }
 
+/**
+ * Pago de deuda sin cuota explícita: si el monto coincide con la siguiente
+ * cuota pendiente de esa deuda, la vincula para que quede marcada como pagada
+ * (el progreso de la deuda se deriva de las cuotas). Si el monto difiere
+ * (abono parcial/extra), no vincula ninguna.
+ */
+async function resolveInstallmentForDebtPayment(
+  input: TransactionInput,
+): Promise<string | null> {
+  if (
+    input.kind !== 'debt_payment' ||
+    !input.debt_id ||
+    input.debt_installment_id
+  ) {
+    return input.debt_installment_id ?? null
+  }
+  const { data, error } = await supabase
+    .from('debt_installments')
+    .select('id, amount')
+    .eq('debt_id', input.debt_id)
+    .in('status', ['pending', 'overdue'])
+    .order('sequence', { ascending: true })
+    .limit(1)
+  if (error) return null
+  const next = data?.[0]
+  if (next && Math.abs(Number(next.amount) - Number(input.amount)) < 1) {
+    return next.id as string
+  }
+  return null
+}
+
 export function useCreateTransaction() {
   const { user } = useAuth()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (input: TransactionInput) => {
-      await callCreateTransactionRpc(input)
+      const installmentId = await resolveInstallmentForDebtPayment(input)
+      await callCreateTransactionRpc({
+        ...input,
+        debt_installment_id: installmentId,
+      })
 
       // Gasto con tarjeta a cuotas → genera el calendario de cuotas de tarjeta.
       // La RPC ya sumó el total a la deuda de la tarjeta; las cuotas son el plan
@@ -218,12 +321,19 @@ export function useUpdateTransaction() {
   })
 }
 
+/**
+ * Borra la transacción REVIRTIENDO su efecto sobre saldos vía la RPC
+ * `delete_financial_transaction` (cuenta, deuda, cuota y recomputo de
+ * tarjeta). Esto hace seguro el flujo "editar monto = borrar y recrear".
+ */
 export function useDeleteTransaction() {
   const { user } = useAuth()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('transactions').delete().eq('id', id)
+      const { error } = await supabase.rpc('delete_financial_transaction', {
+        p_tx_id: id,
+      })
       if (error) throw error
     },
     onSuccess: () => invalidateAfterTx(qc, user!.id),

@@ -1,0 +1,69 @@
+# Compila y despliega la PWA a GitHub Pages en cada push a main.
+#
+# Requisitos una sola vez en el repo (Settings):
+#   1. Pages → Source: "GitHub Actions".
+#   2. Secrets and variables → Actions → New repository secret:
+#        VITE_SUPABASE_URL       (la URL del proyecto Supabase)
+#        VITE_SUPABASE_ANON_KEY  (la anon key pública)
+name: Deploy a GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un despliegue a la vez; cancela el anterior si llega otro push.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests (lógica financiera)
+        run: npm run test
+
+      - name: Build (tsc + vite + PWA)
+        run: npm run build
+        env:
+          # El sitio vive bajo https://<user>.github.io/app-finanzas/
+          VITE_BASE: /app-finanzas/
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Fallback SPA + sin Jekyll
+        # GitHub Pages no reescribe rutas: servir index.html como 404 hace que
+        # /debts, /wallet, etc. carguen la app y react-router resuelva la ruta.
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

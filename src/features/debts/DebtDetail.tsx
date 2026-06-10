@@ -18,6 +18,7 @@ import {
   usePayInstallment,
 } from './hooks'
 import { useAccounts } from '@/features/accounts/hooks'
+import { useCreditCards } from '@/features/credit-cards/hooks'
 import { recalculateDebtProgress } from '@/lib/financial-calculations'
 import { formatDateShort } from '@/lib/date-utils'
 import { cn } from '@/lib/utils'
@@ -53,9 +54,16 @@ const statusChip: Record<InstallmentStatus, string> = {
 export function DebtDetail({ debt }: { debt: DebtRow }) {
   const { data: installments, isLoading } = useInstallmentsByDebt(debt.id)
   const { data: accounts = [] } = useAccounts()
+  const { data: cards = [] } = useCreditCards()
   const pay = usePayInstallment()
   const markOverdue = useMarkOverdueInstallments()
-  const [accountId, setAccountId] = useState<string | null>(null)
+  // Fuente de pago: 'acct:<id>' (cuenta), 'card:<id>' (tarjeta) o '__none'.
+  // Por defecto, la tarjeta configurada en la deuda como medio de pago.
+  const [source, setSource] = useState<string>(
+    debt.payment_method_card_id ? `card:${debt.payment_method_card_id}` : '__none',
+  )
+  const accountId = source.startsWith('acct:') ? source.slice(5) : null
+  const payWithCardId = source.startsWith('card:') ? source.slice(5) : null
 
   // Al abrir el detalle, persiste cuotas vencidas (best-effort).
   useEffect(() => {
@@ -146,27 +154,34 @@ export function DebtDetail({ debt }: { debt: DebtRow }) {
         </div>
       )}
 
-      {/* Cuenta para pagar */}
+      {/* Fuente de pago: cuenta o tarjeta de crédito */}
       <div className="space-y-2">
         <p className="text-[11px] font-semibold text-muted-foreground">
-          Pagar desde la cuenta
+          Pagar con
         </p>
-        <Select
-          value={accountId ?? '__none'}
-          onValueChange={(v) => setAccountId(v === '__none' ? null : v)}
-        >
+        <Select value={source} onValueChange={setSource}>
           <SelectTrigger className="h-12 rounded-2xl border-0 bg-secondary px-4 text-base font-bold focus:ring-2 focus:ring-ring/40 focus:ring-offset-0">
-            <SelectValue placeholder="Sin cuenta (solo marca pagada)" />
+            <SelectValue placeholder="Solo marcar pagada" />
           </SelectTrigger>
           <SelectContent className="rounded-2xl">
-            <SelectItem value="__none">Sin cuenta</SelectItem>
+            <SelectItem value="__none">Solo marcar pagada</SelectItem>
             {accounts.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
+              <SelectItem key={a.id} value={`acct:${a.id}`}>
                 {a.name}
+              </SelectItem>
+            ))}
+            {cards.map((c) => (
+              <SelectItem key={c.id} value={`card:${c.id}`}>
+                Tarjeta · {c.name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {payWithCardId && (
+          <p className="text-xs text-muted-foreground">
+            La cuota se cargará a esta tarjeta (sube su deuda).
+          </p>
+        )}
       </div>
 
       {/* Lista de cuotas */}
@@ -211,6 +226,7 @@ export function DebtDetail({ debt }: { debt: DebtRow }) {
                         await pay.mutateAsync({
                           installmentId: inst.id,
                           accountId,
+                          payWithCardId,
                         })
                         toast.success('Cuota pagada')
                       } catch (e) {

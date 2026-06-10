@@ -62,15 +62,17 @@ export const creditCardSchema = z
     name: z.string().min(1, 'Nombre requerido').max(80),
     bank: z.string().max(80).optional().or(z.literal('').transform(() => undefined)),
     credit_limit: moneyNonNeg,
-    current_debt: moneyNonNeg,
+    // Saldo de apertura: lo que ya debías al registrar la tarjeta. El saldo real
+    // (current_debt) es derivado = opening_balance + cargos − pagos.
+    opening_balance: moneyNonNeg,
     statement_day: dayOfMonth,
     payment_due_day: dayOfMonth,
     color: hex,
     notes: z.string().max(500).optional().or(z.literal('').transform(() => undefined)),
   })
-  .refine((v) => v.current_debt <= v.credit_limit, {
-    path: ['current_debt'],
-    message: 'La deuda actual no puede superar el cupo',
+  .refine((v) => v.opening_balance <= v.credit_limit, {
+    path: ['opening_balance'],
+    message: 'El saldo de apertura no puede superar el cupo',
   })
 export type CreditCardInput = z.infer<typeof creditCardSchema>
 
@@ -114,6 +116,13 @@ export const incomeSourceSchema = z.object({
   notes: z.string().max(500).optional().or(z.literal('').transform(() => undefined)),
 })
 export type IncomeSourceInput = z.infer<typeof incomeSourceSchema>
+
+/** Tramo del historial de sueldos: "desde esta fecha gano X". */
+export const salaryHistoryEntrySchema = z.object({
+  monthly_amount: moneyNonNeg.refine((v) => v > 0, 'El sueldo debe ser mayor que 0'),
+  start_date: dateStr,
+})
+export type SalaryHistoryEntryInput = z.infer<typeof salaryHistoryEntrySchema>
 
 // =============================================================
 // Transactions

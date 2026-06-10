@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CreditCard, Pencil, Plus, Trash2, Wallet } from 'lucide-react'
+import { CreditCard, Pencil, Plus, Scale, Trash2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -26,6 +26,8 @@ import {
   useDeleteCard,
   useUpdateCard,
 } from '@/features/credit-cards/hooks'
+import { TransactionForm } from '@/features/transactions/TransactionForm'
+import { useCreateTransaction } from '@/features/transactions/hooks'
 import {
   calculateAvailableCardLimit,
   nextPaymentDueDate,
@@ -140,8 +142,11 @@ function AccountsSection() {
   const create = useCreateAccount()
   const update = useUpdateAccount()
   const del = useDeleteAccount()
+  const createTx = useCreateTransaction()
   const [openNew, setOpenNew] = useState(false)
   const [editing, setEditing] = useState<AccountRow | null>(null)
+  // Cuenta a la que se le está corrigiendo el saldo (movimiento de Ajuste).
+  const [adjusting, setAdjusting] = useState<AccountRow | null>(null)
 
   return (
     <div className="space-y-5">
@@ -209,7 +214,16 @@ function AccountsSection() {
                     value={Number(a.balance)}
                     className="text-2xl font-semibold tnum"
                   />
-                  <div className="flex justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="pill"
+                      className="mr-auto font-bold"
+                      onClick={() => setAdjusting(a)}
+                    >
+                      <Scale className="mr-1 h-4 w-4" />
+                      Ajustar saldo
+                    </Button>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -249,6 +263,32 @@ function AccountsSection() {
               await update.mutateAsync({ id: editing.id, input: values })
               toast.success('Cuenta actualizada')
               setEditing(null)
+            }}
+          />
+        )}
+      </ResponsiveModal>
+
+      {/* Corregir saldo = movimiento de Ajuste (queda trazado en el historial,
+          con descripción obligatoria), nunca edición directa del número. */}
+      <ResponsiveModal
+        open={!!adjusting}
+        onOpenChange={(o) => !o && setAdjusting(null)}
+        title={adjusting ? `Ajustar saldo · ${adjusting.name}` : 'Ajustar saldo'}
+        className="sm:max-w-xl"
+      >
+        {adjusting && (
+          <TransactionForm
+            defaultKind="adjustment"
+            initialValues={{
+              kind: 'adjustment',
+              account_id: adjusting.id,
+              amount: Number(adjusting.balance),
+            }}
+            onCancel={() => setAdjusting(null)}
+            onSubmit={async (values) => {
+              await createTx.mutateAsync(values)
+              toast.success('Saldo ajustado')
+              setAdjusting(null)
             }}
           />
         )}
