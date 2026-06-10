@@ -25,6 +25,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Los secrets pueden vivir como Repository secrets o como Environment
+    # secrets del environment "github-pages": con esto el job ve ambos.
+    environment: github-pages
     steps:
       - uses: actions/checkout@v4
 
