@@ -33,6 +33,15 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Verificar secrets de Supabase
+        # Sin esto, un secret faltante produce un build "exitoso" pero roto
+        # (GitHub inyecta cadena vacía sin avisar).
+        run: |
+          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ] || [ -z "${{ secrets.VITE_SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::Faltan los Repository secrets VITE_SUPABASE_URL y/o VITE_SUPABASE_ANON_KEY. Créalos en Settings → Secrets and variables → Actions → pestaña Secrets → Repository secrets (no Variables, no Environment secrets)."
+            exit 1
+          fi
+
       - name: Instalar dependencias
         run: npm ci
 
